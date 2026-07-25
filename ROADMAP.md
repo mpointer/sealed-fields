@@ -1,16 +1,20 @@
 # Roadmap
 
-v0.1.0 ships the TypeScript core: canonical AES-256-GCM wire format with
+v0.1.0 shipped the TypeScript core: canonical AES-256-GCM wire format with
 AAD-bound key versions, key namespaces, retired-key rotation, blind indexes,
-row helpers with systemic-failure detection, legacy-format decoders, and a
-Python cross-language fixture in the test suite.
+row helpers with systemic-failure detection, and legacy-format decoders.
 
-## v0.2 candidates
+## v0.2
 
-- [ ] Python package (`sealed-fields` on PyPI) with the identical wire format
-      and API surface, ported from the production Python reference
-      implementation. Shared test vectors prove cross-language compatibility
-      in both CI pipelines.
+- [x] Python package (`sealed-fields` on PyPI) in `python/`: identical wire
+      format and API surface. Shared vectors in `test/vectors.json` are
+      decoded by both suites in CI; data sealed by either implementation
+      unseals in the other.
+- [x] `isSealed` recognizes a sealed empty string (nonce+tag, zero
+      ciphertext bytes) — harvest from the first production adopter, whose
+      shim had to carry its own structural check.
+
+## v0.3 candidates
 - [ ] Drizzle column helpers: a `sealedText()` / `sealedJson()` custom type
       so schema declarations carry the sealing, mirroring the SQLAlchemy
       TypeDecorator pattern in the Python reference.

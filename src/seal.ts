@@ -18,13 +18,16 @@ import { UnknownKeyVersionError } from "./errors.js";
 
 const TOKEN_RE = /^(v\d+):([A-Za-z0-9_-]+={0,2})$/;
 
-/** True when a value structurally matches the canonical sealed format. */
+/** True when a value structurally matches the canonical sealed format.
+ *  Minimum blob length is nonce+tag with ZERO ciphertext bytes: a sealed
+ *  empty string is valid GCM and must be recognized (found by the first
+ *  production adopter, which had to work around the earlier +1 minimum). */
 export function looksSealed(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const m = TOKEN_RE.exec(value);
   if (!m) return false;
   const raw = decodeBlob(m[2]!);
-  return raw.length >= NONCE_BYTES + TAG_BYTES + 1;
+  return raw.length >= NONCE_BYTES + TAG_BYTES;
 }
 
 export function parseToken(token: string): { version: string; blob: string } | null {

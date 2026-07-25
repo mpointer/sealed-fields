@@ -23,3 +23,16 @@ jobs:
       - run: npm run build
       - name: Verify publishable contents
         run: npm pack --dry-run
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install ./python pytest
+      - run: pytest python/tests -q

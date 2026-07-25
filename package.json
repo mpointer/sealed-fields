@@ -1,6 +1,6 @@
 {
   "name": "sealed-fields",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Field-level encryption for PII at rest: AES-256-GCM with versioned key rotation, key namespaces, HMAC blind indexes for equality lookups on encrypted columns, and row helpers with systemic-failure detection. Zero dependencies, bring your own database.",
   "license": "MIT",
   "author": "Michael Pointer <mpointer@gmail.com>",

@@ -194,4 +194,11 @@ describe("utilities", () => {
     expect(isSealed(null)).toBe(false);
     expect(isSealed(42)).toBe(false);
   });
+
+  it("recognizes and round-trips a sealed empty string (adopter harvest)", () => {
+    const sf = makeSf();
+    const token = sf.seal("");
+    expect(isSealed(token)).toBe(true); // nonce+tag, zero ciphertext bytes
+    expect(sf.unseal(token)).toBe("");
+  });
 });

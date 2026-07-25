@@ -1,0 +1,16 @@
+{
+  "comment": "Shared cross-language vectors. Both test suites (TypeScript: test/cross-language.test.ts, Python: python/tests/test_cross_language.py) must decode every token here. key is bytes(range(32)) in base64; blindIndexKey likewise.",
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "plaintext": "cross-language sealed value — 你好",
+  "tokens": {
+    "python_reference_padded": "v1:AAECAwQFBgcICQoLJHC5aLbIrnrjJuLq1oxYHua361GUWykdVBKApf_plJLlrQ4ZCnwmQ-wWBunh3zzykDCNKuLC",
+    "typescript_impl": "v1:4Xfrzq5WVB0zonY4vjxc0TVMXtwgSgALEF-oNg0RSJyw3B0JDFrBKLP6Nf66dhx-v5Fs3sbuYW9OiE-ol8jeYKsG",
+    "python_impl": "v1:MXlRqh9PfXeYG4bqYQTQlC7OW5wQ0vEALeZ3YuKj2InXCLJ03i_MvqxW4HmJRDLDxGgaOlgz0SeC5ZT1L1wKOJ0G"
+  },
+  "blindIndex": {
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "value": "  Alice@Example.COM ",
+    "normalized": "alice@example.com",
+    "hex": "a59fc578d4cb46faab1d6eb348e7c74b33b85122d6459fdb7bf5654b333acab4"
+  }
+}

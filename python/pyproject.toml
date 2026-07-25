@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sealed-fields"
+version = "0.2.0"
+description = "Field-level encryption for PII at rest: AES-256-GCM with versioned key rotation, key namespaces, HMAC blind indexes, and row helpers with systemic-failure detection. Wire-compatible with the sealed-fields npm package."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Michael Pointer", email = "mpointer@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = ["cryptography>=41"]
+keywords = [
+  "encryption", "field-encryption", "pii", "aes-256-gcm", "blind-index",
+  "encryption-at-rest", "key-rotation", "searchable-encryption", "sqlalchemy",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security :: Cryptography",
+]
+
+[project.urls]
+Homepage = "https://github.com/mpointer/sealed-fields"
+Issues = "https://github.com/mpointer/sealed-fields/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sealed_fields"]
