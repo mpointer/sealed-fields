@@ -1,0 +1,58 @@
+{
+  "name": "sealed-fields",
+  "version": "0.1.0",
+  "description": "Field-level encryption for PII at rest: AES-256-GCM with versioned key rotation, key namespaces, HMAC blind indexes for equality lookups on encrypted columns, and row helpers with systemic-failure detection. Zero dependencies, bring your own database.",
+  "license": "MIT",
+  "author": "Michael Pointer <mpointer@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mpointer/sealed-fields.git"
+  },
+  "homepage": "https://github.com/mpointer/sealed-fields#readme",
+  "bugs": "https://github.com/mpointer/sealed-fields/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": [
+    "encryption",
+    "field-encryption",
+    "pii",
+    "aes-256-gcm",
+    "blind-index",
+    "encryption-at-rest",
+    "key-rotation",
+    "searchable-encryption",
+    "hmac",
+    "drizzle",
+    "database"
+  ],
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
