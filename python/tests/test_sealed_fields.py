@@ -263,6 +263,16 @@ class TestBlindIndexAndUtils:
         expected = hmac_mod.new(raw, b"alice@example.com", hashlib.sha256).hexdigest()
         assert sf.blind_index("alice@example.com") == expected
 
+    def test_blind_index_custom_normalizer(self):
+        sf = make_sf(blind_index_key=KEY_A)
+        casefold = lambda s: s.strip().casefold()
+        # "ß".casefold() is "ss" while lower() leaves it alone, so the two
+        # policies produce different tokens for the same input.
+        assert sf.blind_index(" Straße ", normalize=casefold) == sf.blind_index(
+            "strasse", normalize=False
+        )
+        assert sf.blind_index("Straße", normalize=casefold) != sf.blind_index("Straße")
+
     def test_blind_index_requires_key(self):
         with pytest.raises(KeyNotConfiguredError):
             make_sf().blind_index("x")

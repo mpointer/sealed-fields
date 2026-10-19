@@ -192,11 +192,13 @@ export class SealedFields {
    * Normalization (default on): trim + Unicode-aware lowercase, so
    * "Alice@Example.com " and "alice@example.com" index identically.
    */
-  blindIndex(value: string, options?: { normalize?: boolean }): string {
+  blindIndex(value: string, options?: { normalize?: boolean | ((value: string) => string) }): string {
     if (!this.indexKey) {
       throw new KeyNotConfiguredError("blindIndexKey is not configured; cannot build a blind index.");
     }
-    const normalized = options?.normalize === false ? value : value.trim().toLowerCase();
+    const normalize = options?.normalize;
+    const normalized =
+      typeof normalize === "function" ? normalize(value) : normalize === false ? value : value.trim().toLowerCase();
     return createHmac("sha256", this.indexKey).update(normalized, "utf8").digest("hex");
   }
 
