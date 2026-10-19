@@ -32,3 +32,23 @@ jobs:
       - run: npx vitest run
       - run: npm run build
       - run: npm publish --provenance --access public
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tag matches python/pyproject.toml version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(python -c "import tomllib; print(tomllib.load(open('python/pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag v$TAG does not match python/pyproject.toml version $PKG" >&2
+            exit 1
+          fi
+      - run: pip install "./python[sqlalchemy]" pytest build
+      - run: pytest python/tests -q
+      - run: python -m build python --outdir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1 # OIDC trusted publishing; no token stored

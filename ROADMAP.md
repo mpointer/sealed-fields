@@ -14,7 +14,23 @@ row helpers with systemic-failure detection, and legacy-format decoders.
       ciphertext bytes) — harvest from the first production adopter, whose
       shim had to carry its own structural check.
 
-## v0.3 candidates
+## v0.3
+
+- [x] SQLAlchemy column types in the Python package, as the `sqlalchemy`
+      extra: `SealedText`, `SealedString`, `SealedJSON` TypeDecorators with
+      a provider (instance or lazy callable) and a namespace, both part of
+      the SQLAlchemy cache key. Harvested from the first production
+      adopter's own TypeDecorators, keeping its boundary rules (NULL both
+      ways, sealed empty string, plaintext passthrough mid-migration, mode
+      decides key-less writes, bad tokens raise). Tested on SQLAlchemy 1.4
+      and 2.x.
+- [x] `blindIndex` / `blind_index` accept a custom normalizer function, for
+      index columns whose stored tokens were built under a rule other than
+      trim + lowercase (the adopter above used casefold).
+- [x] Release workflow publishes the Python package to PyPI by trusted
+      publishing on the same `v*` tag as npm.
+
+## v0.4 candidates
 - [ ] Drizzle column helpers: a `sealedText()` / `sealedJson()` custom type
       so schema declarations carry the sealing, mirroring the SQLAlchemy
       TypeDecorator pattern in the Python reference.
@@ -27,8 +43,6 @@ row helpers with systemic-failure detection, and legacy-format decoders.
 
 ## Later / on demand
 
-- [ ] SQLAlchemy TypeDecorators in the Python package (EncryptedText,
-      EncryptedJSON) once the core port lands.
 - [ ] Additional legacy decoders if adopters bring other common formats
       (for example the compact binary `base64(iv|tag|ct)` shape).
 - [ ] scrypt/HKDF key-derivation helper for teams that manage passphrase

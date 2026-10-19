@@ -86,6 +86,8 @@ const row = await db.query.users.findFirst({
 
 Only index high-entropy values: emails, usernames, phone numbers. Never index a low-entropy field like state, zip code, or birth year. A deterministic MAC over a small domain is trivially dictionary-attacked.
 
+`normalize` can also be a function (`{ normalize: (v) => v.trim().toUpperCase() }`) when existing index tokens were built under a different rule. Every writer and reader of a column must use the same normalization or lookups silently miss.
+
 ## Row helpers
 
 Declare which fields on a table are sealed, once, and use the row helpers at the write and read boundaries:
@@ -147,7 +149,7 @@ Namespaces are listed explicitly. The helper never scans the environment, so a t
 
 ## Cross-language
 
-The wire format is deliberately simple and language-neutral: AES-256-GCM, `nonce || ciphertext || tag`, urlsafe base64, key version as AAD. A Python package with the identical API lives in [`python/`](./python/) (`pip install sealed-fields`). Both test suites decode the same shared vectors (`test/vectors.json`), so cross-language compatibility is proven in CI, not asserted in prose.
+The wire format is deliberately simple and language-neutral: AES-256-GCM, `nonce || ciphertext || tag`, urlsafe base64, key version as AAD. A Python package with the identical API lives in [`python/`](./python/) (`pip install sealed-fields`). Both test suites decode the same shared vectors (`test/vectors.json`), so cross-language compatibility is proven in CI, not asserted in prose. The Python package also ships SQLAlchemy column types (`pip install "sealed-fields[sqlalchemy]"`: `SealedText`, `SealedString`, `SealedJSON`), documented in [`python/README.md`](./python/README.md).
 
 ## What this is not
 
