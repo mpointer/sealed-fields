@@ -94,6 +94,8 @@ What happens at the boundary, each one a production lesson:
 - A token naming a key version that is not in the keyring raises
   `UnknownKeyVersionError`. During a rotation, build the `SealedFields`
   with `on_unknown_version="passthrough"` and the token comes back as-is.
+- Plaintext in the column reads through unchanged by default. With
+  `plaintext="reject"` on the `SealedFields`, it raises instead.
 - `SealedJSON` serializes with compact separators and `ensure_ascii=False`
   before sealing, and parses after unsealing. The backing column is `Text`,
   not `json` or `jsonb`. If a column is still `json`/`jsonb` because that
