@@ -26,7 +26,7 @@ jobs:
             echo "Tag v$TAG does not match package.json version $PKG" >&2
             exit 1
           fi
-      - run: npm install -g npm@latest # OIDC trusted publishing needs npm >= 11.5
+      - run: npm install -g npm@11.21.1 # pinned; OIDC trusted publishing needs npm >= 11.5
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npx vitest run
