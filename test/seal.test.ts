@@ -64,6 +64,22 @@ describe("seal / unseal", () => {
     expect(() => createSealedFields({ namespaces: { PII: { key: "tooshort" } } })).toThrow(
       KeyNotConfiguredError,
     );
+    // Both decoded to exactly 32 bytes under the old lenient parser, because
+    // Node's base64 decoder silently skips spaces and invalid characters.
+    for (const key of [
+      "A".repeat(20) + " " + "A".repeat(23),
+      "A".repeat(21) + "!" + "A".repeat(22),
+    ]) {
+      expect(() => createSealedFields({ namespaces: { PII: { key } } })).toThrow(KeyNotConfiguredError);
+    }
+  });
+
+  it("accepts padded standard base64 (openssl rand -base64 32)", () => {
+    const padded = Buffer.from(KEY_A, "base64url").toString("base64");
+    expect(padded).toHaveLength(44);
+    const a = createSealedFields({ namespaces: { PII: { key: KEY_A } } });
+    const b = createSealedFields({ namespaces: { PII: { key: padded } } });
+    expect(b.unseal(a.seal("x"))).toBe("x");
   });
 
   it("tampering with the version prefix fails authentication (AAD binding)", () => {
@@ -161,6 +177,20 @@ describe("strict vs dormant mode", () => {
     expect(sf.seal("y")).toBe("y");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("PLAINTEXT");
+  });
+
+  it("dormant: warns once per namespace, not once per instance", () => {
+    const warnings: string[] = [];
+    const sf = createSealedFields({
+      namespaces: { A: {}, B: {} },
+      mode: "dormant",
+      logger: { warn: (m) => warnings.push(m) },
+    });
+    sf.seal("x", "A");
+    sf.seal("y", "B");
+    sf.seal("z", "B");
+    expect(warnings).toHaveLength(2);
+    expect(warnings[1]).toContain('"B"');
   });
 
   it("rejects an unrecognized mode instead of failing open to plaintext", () => {

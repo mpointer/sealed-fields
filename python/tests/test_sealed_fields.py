@@ -82,6 +82,19 @@ class TestSealUnseal:
     def test_malformed_key_rejected(self):
         with pytest.raises(KeyNotConfiguredError):
             create_sealed_fields(namespaces={"PII": {"key": "tooshort"}})
+        for lenient in [
+            "A" * 20 + " " + "A" * 23,
+            "A" * 21 + "!" + "A" * 22,
+        ]:
+            with pytest.raises(KeyNotConfiguredError):
+                create_sealed_fields(namespaces={"PII": {"key": lenient}})
+
+    def test_padded_standard_base64_key_accepted(self):
+        padded = base64.b64encode(base64.urlsafe_b64decode(KEY_A + "=")).decode()
+        assert len(padded) == 44
+        a = make_sf()
+        b = create_sealed_fields(namespaces={"PII": {"key": padded}})
+        assert b.unseal(a.seal("x")) == "x"
 
 
 class TestRotation:
@@ -140,6 +153,17 @@ class TestModes:
         assert sf.seal("y") == "y"
         assert len(warnings) == 1
         assert "PLAINTEXT" in warnings[0]
+
+    def test_dormant_warns_once_per_namespace(self):
+        warnings = []
+        sf = create_sealed_fields(
+            namespaces={"A": {}, "B": {}}, mode="dormant", logger=warnings.append
+        )
+        sf.seal("x", "A")
+        sf.seal("y", "B")
+        sf.seal("z", "B")
+        assert len(warnings) == 2
+        assert '"B"' in warnings[1]
 
 
 class TestRows:
@@ -345,6 +369,10 @@ class TestCrossLanguage:
         for name, token in VECTORS["tokens"].items():
             assert sf.unseal(token) == VECTORS["plaintext"], name
         assert sf.blind_index(VECTORS["blindIndex"]["value"]) == VECTORS["blindIndex"]["hex"]
+        ctx = VECTORS["blindIndexContext"]
+        assert sf.blind_index(ctx["value"], context=ctx["context"]) == ctx["hex"]
+        trim = VECTORS["blindIndexTrim"]
+        assert sf.blind_index(trim["value"]) == trim["hex"]
 
 
 def test_short_canonical_token_rejected():
@@ -352,3 +380,25 @@ def test_short_canonical_token_rejected():
     for t in ["v1:AAAAAA", "v1:AAAAAAAAAAA", "v1:" + "A" * 36]:
         with pytest.raises(SealedFieldsError, match="too short"):
             sf.unseal(t)
+
+
+def test_blind_index_context_separates_columns():
+    sf = make_sf(blind_index_key=KEY_A)
+    plain = sf.blind_index("alice@example.com")
+    users = sf.blind_index("alice@example.com", context="users.email")
+    contacts = sf.blind_index("alice@example.com", context="contacts.email")
+    assert len({plain, users, contacts}) == 3
+    assert sf.blind_index("alice@example.com", context="") == plain
+    with pytest.raises(SealedFieldsError):
+        sf.blind_index("x", context="a\0b")
+
+
+def test_trailing_newline_is_not_a_token():
+    token = make_sf().seal("x")
+    assert not is_sealed(token + "\n")
+    assert make_sf().unseal(token + "\n") == token + "\n"
+
+
+def test_empty_namespace_is_not_the_default():
+    with pytest.raises(SealedFieldsError, match="unknown namespace"):
+        make_sf().seal("x", "")
