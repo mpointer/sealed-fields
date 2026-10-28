@@ -28,6 +28,13 @@ describe("blindIndex", () => {
     expect(sf.blindIndex("Alice", { normalize: false })).not.toBe(sf.blindIndex("alice", { normalize: false }));
   });
 
+  it("accepts a custom normalizer in place of the boolean", () => {
+    const sf = makeSf();
+    const upper = (v: string) => v.trim().toUpperCase();
+    expect(sf.blindIndex("  alice ", { normalize: upper })).toBe(sf.blindIndex("ALICE", { normalize: false }));
+    expect(sf.blindIndex("alice", { normalize: upper })).not.toBe(sf.blindIndex("alice"));
+  });
+
   it("matches a reference HMAC-SHA256 computation", () => {
     const sf = makeSf();
     const expected = createHmac("sha256", Buffer.from(INDEX_KEY, "base64url"))

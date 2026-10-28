@@ -22,6 +22,9 @@ classifiers = [
   "Topic :: Security :: Cryptography",
 ]
 
+[project.optional-dependencies]
+sqlalchemy = ["SQLAlchemy>=1.4"]
+
 [project.urls]
 Homepage = "https://github.com/mpointer/sealed-fields"
 Issues = "https://github.com/mpointer/sealed-fields/issues"

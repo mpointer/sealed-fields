@@ -29,10 +29,13 @@ jobs:
     strategy:
       matrix:
         python: ["3.10", "3.12"]
+        sqlalchemy: ["1.4.*", "2.*"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install ./python pytest
+      - run: pip install "./python[sqlalchemy]" "SQLAlchemy==${{ matrix.sqlalchemy }}" pytest build
       - run: pytest python/tests -q
+      - name: Verify the sdist and wheel build
+        run: python -m build python --outdir /tmp/sf-dist

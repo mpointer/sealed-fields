@@ -333,7 +333,9 @@ class SealedFields:
             return None
         return self.unseal(value, namespace)
 
-    def blind_index(self, value: str, *, normalize: bool = True) -> str:
+    def blind_index(
+        self, value: str, *, normalize: bool | Callable[[str], str] = True
+    ) -> str:
         """Deterministic HMAC-SHA256 lookup token for an equality query on an
         otherwise-sealed column. ONLY for high-entropy values (email, username,
         phone). Never index a low-entropy field: a deterministic MAC over a
@@ -341,12 +343,21 @@ class SealedFields:
 
         Normalization (default on) is trim + lowercase, matching the npm
         package's String.prototype.toLowerCase for cross-language equality.
+        Pass a callable to normalize differently, for example
+        ``lambda s: s.strip().casefold()`` when existing index tokens were
+        built with casefold. Whatever you pick, every writer and every reader
+        of a column must use the same normalization, or lookups silently miss.
         """
         if self._index_key is None:
             raise KeyNotConfiguredError(
                 "blind_index_key is not configured; cannot build a blind index."
             )
-        normalized = value.strip().lower() if normalize else value
+        if callable(normalize):
+            normalized = normalize(value)
+        elif normalize:
+            normalized = value.strip().lower()
+        else:
+            normalized = value
         return hmac_mod.new(self._index_key, normalized.encode("utf-8"), hashlib.sha256).hexdigest()
 
     # -- row helpers ---------------------------------------------------------
