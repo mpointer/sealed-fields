@@ -2,10 +2,27 @@
 
 Both packages share one version number and one `v*` tag.
 
-## Unreleased
+## 0.6.0 (2026-10-28)
 
 Both packages:
 
+- Context binding. `seal` / `unseal` take an optional `context` (a string or
+  parts such as `["users", "email"]`), bound into the GCM AAD as
+  `version || 0x00 || context`. A token copied to another column or row
+  fails authentication. The token format is unchanged, and tokens sealed
+  without a context read exactly as before. Shared vectors added.
+- TS: the second argument of `seal`, `unseal`, `maybeSeal` and `maybeUnseal`
+  is a namespace string or `{ namespace, context }`. Python takes
+  `context=` as a keyword.
+- Row helpers accept a `context(field, row)` function in the spec.
+- `contextFallback` / `context_fallback` for migrating existing rows: a
+  read that fails under the context is retried without it, logged once per
+  namespace, and counted in `stats().unboundReads` (Python
+  `stats()["unbound_reads"]`). Legacy-format tokens read with a context
+  only under fallback.
+- Python: `SealedText`, `SealedString` and `SealedJSON` take `context`
+  (column-level), included in the SQLAlchemy cache key.
+- CI reports coverage and fails below set thresholds.
 - New `plaintext: "reject"` / `plaintext="reject"` option for fully migrated
   columns. `unseal` throws on a non-token value instead of passing it
   through, and the row helpers null it and count it toward

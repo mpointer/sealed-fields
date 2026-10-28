@@ -23,6 +23,7 @@ import re
 import secrets
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 __all__ = [
@@ -118,6 +119,25 @@ def is_sealed(value: Any) -> bool:
     return len(raw) >= NONCE_BYTES + TAG_BYTES  # empty plaintext is valid GCM
 
 
+def _encode_context(context: str | Sequence[str] | None) -> str | None:
+    """Parts joined with NUL; "" and [] mean no context. Matches the npm package."""
+    if context is None:
+        return None
+    parts = [context] if isinstance(context, str) else list(context)
+    if not parts or parts == [""]:
+        return None
+    for p in parts:
+        if not isinstance(p, str) or p == "" or "\0" in p:
+            raise SealedFieldsError("context parts must be non-empty strings without NUL.")
+    return "\0".join(parts)
+
+
+def _build_aad(version: str, context: str | None) -> bytes:
+    """GCM AAD: the version label, plus ``0x00 || context`` when bound."""
+    v = version.encode("ascii")
+    return v if context is None else v + b"\0" + context.encode("utf-8")
+
+
 # String.prototype.trim()'s set. str.strip() differs (it also strips
 # \x1c-\x1f and \x85, and keeps \ufeff), which would split blind-index tokens.
 _JS_WHITESPACE = (
@@ -204,6 +224,7 @@ class SealedFields:
         legacy: Sequence[str] = (),
         on_unknown_version: str = "throw",
         plaintext: str = "passthrough",
+        context_fallback: bool = False,
         logger: Callable[[str], None] | None = None,
     ) -> None:
         if not namespaces:
@@ -241,6 +262,11 @@ class SealedFields:
                 'plaintext "reject" cannot be combined with mode "dormant", which writes plaintext.'
             )
         self._plaintext = plaintext
+        if not isinstance(context_fallback, bool):
+            raise SealedFieldsError("context_fallback must be a boolean.")
+        self._context_fallback = context_fallback
+        self._warned_fallback: set[str] = set()
+        self._unbound_reads = 0
         self._warn = logger or (lambda m: print(m))
         self._warned_dormant: set[str] = set()
 
@@ -293,7 +319,16 @@ class SealedFields:
     def is_configured(self, namespace: str | None = None) -> bool:
         return self._rings[self._resolve_ns(namespace)] is not None
 
-    def seal(self, plaintext: str, namespace: str | None = None) -> str:
+    def seal(
+        self,
+        plaintext: str,
+        namespace: str | None = None,
+        *,
+        context: str | Sequence[str] | None = None,
+    ) -> str:
+        """Encrypt under the namespace's active key, bound to ``context`` if
+        given (see ``unseal``)."""
+        aad_context = _encode_context(context)
         ns = self._resolve_ns(namespace)
         ring = self._rings[ns]
         if ring is None:
@@ -305,11 +340,24 @@ class SealedFields:
             return plaintext
         nonce = secrets.token_bytes(NONCE_BYTES)
         aes = AESGCM(ring.keys[ring.active_version])
-        ct = aes.encrypt(nonce, plaintext.encode("utf-8"), ring.active_version.encode("ascii"))
+        ct = aes.encrypt(
+            nonce, plaintext.encode("utf-8"), _build_aad(ring.active_version, aad_context)
+        )
         blob = base64.urlsafe_b64encode(nonce + ct).decode("ascii").rstrip("=")
         return f"{ring.active_version}:{blob}"
 
-    def unseal(self, value: str, namespace: str | None = None) -> str:
+    def unseal(
+        self,
+        value: str,
+        namespace: str | None = None,
+        *,
+        context: str | Sequence[str] | None = None,
+    ) -> str:
+        """Decrypt a token. ``context`` must match the one it was sealed with:
+        a string or parts such as ``["users", "email"]``, joined with NUL.
+        With ``context_fallback=True`` a token sealed without a context still
+        reads, and is counted in ``stats()["unbound_reads"]``."""
+        aad_context = _encode_context(context)
         ns = self._resolve_ns(namespace)
         ring = self._rings[ns]
         m = _TOKEN_RE.fullmatch(value)
@@ -331,24 +379,76 @@ class SealedFields:
             if len(raw) < NONCE_BYTES + TAG_BYTES:
                 raise SealedFieldsError("unseal: token is too short to be a sealed value.")
             nonce, ct = raw[:NONCE_BYTES], raw[NONCE_BYTES:]
-            return AESGCM(key).decrypt(nonce, ct, version.encode("ascii")).decode("utf-8")
-        if ring is not None and self._legacy:
+            aes = AESGCM(key)
+            try:
+                return aes.decrypt(nonce, ct, _build_aad(version, aad_context)).decode("utf-8")
+            except InvalidTag as err:
+                # Only an auth failure can mean "sealed before binding".
+                if aad_context is None or not self._context_fallback:
+                    raise
+                try:
+                    out = aes.decrypt(nonce, ct, _build_aad(version, None)).decode("utf-8")
+                except InvalidTag:
+                    raise err from None
+                self._note_unbound_read(ns)
+                return out
+        if (
+            ring is not None
+            and self._legacy
+            and any(_match_legacy(value, f) for f in self._legacy)
+        ):
+            # Legacy formats have no AAD, so they cannot carry a binding.
+            if aad_context is not None and not self._context_fallback:
+                raise SealedFieldsError(
+                    "unseal: legacy token cannot be bound to a context "
+                    "(enable context_fallback to migrate)."
+                )
             decoded = self._try_legacy(value, ring)
             if decoded is not None:
+                if aad_context is not None:
+                    self._note_unbound_read(ns)
                 return decoded
         if self._plaintext == "reject":
             raise SealedFieldsError('unseal: value is not a sealed token (plaintext: "reject").')
         return value  # plaintext passthrough
 
-    def maybe_seal(self, value: str | None, namespace: str | None = None) -> str | None:
-        if value is None or value == "":
-            return None
-        return self.seal(value, namespace)
+    def _note_unbound_read(self, ns: str) -> None:
+        self._unbound_reads += 1
+        if ns in self._warned_fallback:
+            return
+        self._warned_fallback.add(ns)
+        self._warn(
+            f'[sealed-fields] namespace "{ns}": read a token with no context binding via '
+            f'context_fallback. Re-encrypt to bind it; stats()["unbound_reads"] counts these reads.'
+        )
 
-    def maybe_unseal(self, value: str | None, namespace: str | None = None) -> str | None:
+    def stats(self) -> dict[str, int]:
+        """Counters since this instance was created. ``unbound_reads`` is the
+        number of reads that needed context_fallback; it should stay at zero
+        before fallback is turned off. Per instance and per process."""
+        return {"unbound_reads": self._unbound_reads}
+
+    def maybe_seal(
+        self,
+        value: str | None,
+        namespace: str | None = None,
+        *,
+        context: str | Sequence[str] | None = None,
+    ) -> str | None:
         if value is None or value == "":
             return None
-        return self.unseal(value, namespace)
+        return self.seal(value, namespace, context=context)
+
+    def maybe_unseal(
+        self,
+        value: str | None,
+        namespace: str | None = None,
+        *,
+        context: str | Sequence[str] | None = None,
+    ) -> str | None:
+        if value is None or value == "":
+            return None
+        return self.unseal(value, namespace, context=context)
 
     def blind_index(
         self,
@@ -398,15 +498,20 @@ class SealedFields:
     # -- row helpers ---------------------------------------------------------
 
     @staticmethod
-    def _normalize_spec(spec: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def _normalize_spec(spec: Any) -> tuple[tuple[str, ...], tuple[str, ...], Any]:
+        # A Mapping spec may carry "context": a callable (field, row) -> context.
         if isinstance(spec, Mapping):
-            return tuple(spec.get("fields") or ()), tuple(spec.get("json_fields") or ())
-        return tuple(spec), ()
+            return (
+                tuple(spec.get("fields") or ()),
+                tuple(spec.get("json_fields") or ()),
+                spec.get("context"),
+            )
+        return tuple(spec), (), None
 
     def seal_row(
         self, row: Mapping[str, Any], spec: Any, namespace: str | None = None
     ) -> dict[str, Any]:
-        fields, json_fields = self._normalize_spec(spec)
+        fields, json_fields, ctx = self._normalize_spec(spec)
         out = dict(row)
         for field in json_fields:
             v = out.get(field)
@@ -418,13 +523,13 @@ class SealedFields:
                 continue
             # Seal unconditionally: a value that merely looks like a token is
             # untrusted input, not ciphertext. Call seal_row once per write.
-            out[field] = self.seal(v, namespace)
+            out[field] = self.seal(v, namespace, context=ctx(field, row) if ctx else None)
         return out
 
     def _unseal_row_internal(
         self, row: Mapping[str, Any], spec: Any, namespace: str | None
     ) -> tuple[dict[str, Any], int, int]:
-        fields, json_fields = self._normalize_spec(spec)
+        fields, json_fields, ctx = self._normalize_spec(spec)
         out = dict(row)
         failures = 0
         attempts = 0
@@ -438,7 +543,7 @@ class SealedFields:
                 continue
             attempts += 1
             try:
-                out[field] = self.unseal(v, namespace)
+                out[field] = self.unseal(v, namespace, context=ctx(field, row) if ctx else None)
             except Exception as err:
                 # Never hand raw ciphertext to a caller; None is a safe sentinel.
                 self._warn(f'[sealed-fields] unseal failed for field "{field}": {err}')

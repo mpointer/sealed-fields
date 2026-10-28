@@ -306,3 +306,29 @@ class TestProviderAndCaching:
     def test_string_impl_kwargs_pass_through(self):
         t = SealedString(SF_A, length=512)
         assert t.impl.length == 512
+
+
+class TestContext:
+    def test_column_context_binds_and_rejects_a_moved_value(self, engine):
+        md = MetaData()
+        t = Table(
+            "bound",
+            md,
+            Column("id", Integer, primary_key=True),
+            Column("email", SealedText(SF_A, "PII", ["users", "email"])),
+            Column("notes", SealedText(SF_A, "PII", "users.notes")),
+        )
+        md.create_all(engine)
+        with engine.begin() as c:
+            c.execute(insert(t).values(id=1, email="a@x", notes="hi"))
+            assert c.execute(select(t.c.email)).scalar() == "a@x"
+            stored = c.execute(text("SELECT email FROM bound")).scalar()
+            assert SF_A.unseal(stored, context=["users", "email"]) == "a@x"
+            c.execute(text("UPDATE bound SET notes = :v"), {"v": stored})
+            with pytest.raises(Exception):
+                c.execute(select(t.c.notes)).scalar()
+
+    def test_context_is_part_of_the_cache_key(self):
+        a = SealedText(SF_A, "PII", ["users", "email"])
+        b = SealedText(SF_A, "PII", ["users", "notes"])
+        assert a._static_cache_key != b._static_cache_key

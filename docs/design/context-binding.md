@@ -1,6 +1,6 @@
 # Design note: binding sealed values to their row and column
 
-Status: accepted, not implemented. Target: 0.6.0.
+Status: implemented in 0.6.0.
 
 ## Problem
 

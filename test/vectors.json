@@ -24,5 +24,16 @@
     "value": "\ufeff\u001fAlice@Example.COM\u0085 ",
     "normalized": "\u001falice@example.com\u0085",
     "hex": "a297d0e20e0904df24d529427b4dadf08d59bcb42d328acae31973e76990db47"
+  },
+  "contextTokens": {
+    "comment": "Sealed with context [\"users\", \"email\"] (AAD = version || 0x00 || \"users\" || 0x00 || \"email\"). Must fail without it.",
+    "context": [
+      "users",
+      "email"
+    ],
+    "tokens": {
+      "node_impl": "v1:hLJ5kIHjpm_FyQMRSRJuJEeQaMY5_ZU8YeyGsb3ERkn7McXSC40lMbCMJYiuqkQDYeN7ytIsWjA7K41ARc7ERVQa",
+      "python_impl": "v1:WDnhin054Rc2ALSJorasmKIe5r4PtxmjaNEIDboOC-x6ZM1GqJB6t9SMupsybhBRgZSWVlXc5xSgHzLTRHXHPGnO"
+    }
   }
 }

@@ -57,7 +57,41 @@ export interface SealedFieldsConfig {
    * toward SystemicUnsealError. Cannot be combined with mode "dormant".
    */
   plaintext?: "passthrough" | "reject";
+  /**
+   * Migration aid for context binding. When a context is given and the token
+   * does not authenticate under it, retry without the context (and accept
+   * enabled legacy formats, which carry no binding). Each such read is counted
+   * in stats().unboundReads and logged once per namespace. Turn it off once a
+   * re-encrypt backfill has bound every row; from then on a moved or unbound
+   * token fails like a tampered one.
+   */
+  contextFallback?: boolean;
   logger?: SealedFieldsLogger;
+}
+
+/** Context bound into a token's AAD: a string, or parts such as
+ *  ["users", "email"]. Parts are joined with NUL, so they may not contain NUL
+ *  or be empty. "" and [] mean no context. */
+export type SealContext = string | readonly string[];
+
+/** Second argument of seal/unseal: a namespace name, or options. */
+export type SealOptions = string | { namespace?: string | undefined; context?: SealContext | undefined };
+
+function encodeContext(context: SealContext | undefined): string | null {
+  if (context === undefined) return null;
+  const parts = typeof context === "string" ? [context] : [...context];
+  if (parts.length === 0 || (parts.length === 1 && parts[0] === "")) return null;
+  for (const p of parts) {
+    if (typeof p !== "string" || p === "" || p.includes("\0")) {
+      throw new SealedFieldsError("context parts must be non-empty strings without NUL.");
+    }
+  }
+  return parts.join("\0");
+}
+
+function splitOptions(options: SealOptions | undefined): { namespace: string | undefined; context: string | null } {
+  if (options === undefined || typeof options === "string") return { namespace: options, context: null };
+  return { namespace: options.namespace, context: encodeContext(options.context) };
 }
 
 /** Field spec for row helpers. Plain array = string fields. jsonFields are
@@ -66,12 +100,24 @@ export interface SealedFieldsConfig {
  *  inverses regardless of whether the value was an object or a string. */
 export type FieldSpec =
   | readonly string[]
-  | { fields?: readonly string[]; jsonFields?: readonly string[] };
+  | {
+      fields?: readonly string[];
+      jsonFields?: readonly string[];
+      /** Context per field, given the row as passed in. Bind table and
+       *  column by default: (field) => ["users", field]. */
+      context?: (field: string, row: Record<string, unknown>) => SealContext | undefined;
+    };
 
-function normalizeSpec(spec: FieldSpec): { fields: readonly string[]; jsonFields: readonly string[] } {
+type NormalizedSpec = {
+  fields: readonly string[];
+  jsonFields: readonly string[];
+  context?: ((field: string, row: Record<string, unknown>) => SealContext | undefined) | undefined;
+};
+
+function normalizeSpec(spec: FieldSpec): NormalizedSpec {
   if (Array.isArray(spec)) return { fields: spec, jsonFields: [] };
-  const s = spec as { fields?: readonly string[]; jsonFields?: readonly string[] };
-  return { fields: s.fields ?? [], jsonFields: s.jsonFields ?? [] };
+  const s = spec as Exclude<FieldSpec, readonly string[]>;
+  return { fields: s.fields ?? [], jsonFields: s.jsonFields ?? [], context: s.context };
 }
 
 export class SealedFields {
@@ -82,6 +128,9 @@ export class SealedFields {
   private readonly legacy: readonly LegacyFormat[];
   private readonly onUnknownVersion: "throw" | "passthrough";
   private readonly plaintext: "passthrough" | "reject";
+  private readonly contextFallback: boolean;
+  private readonly warnedFallback = new Set<string>();
+  private unboundReads = 0;
   private readonly logger: SealedFieldsLogger;
   private readonly warnedDormant = new Set<string>();
 
@@ -129,6 +178,10 @@ export class SealedFields {
     if (this.plaintext === "reject" && this.mode === "dormant") {
       throw new SealedFieldsError(`plaintext "reject" cannot be combined with mode "dormant", which writes plaintext.`);
     }
+    this.contextFallback = config.contextFallback ?? false;
+    if (typeof this.contextFallback !== "boolean") {
+      throw new SealedFieldsError(`contextFallback must be a boolean.`);
+    }
     this.logger = config.logger ?? console;
   }
 
@@ -157,8 +210,10 @@ export class SealedFields {
     return this.rings.get(this.resolveNs(namespace)) != null;
   }
 
-  /** Encrypt a UTF-8 string under the namespace's active key. */
-  seal(plaintext: string, namespace?: string): string {
+  /** Encrypt a UTF-8 string under the namespace's active key, bound to the
+   *  context if one is given. */
+  seal(plaintext: string, options?: SealOptions): string {
+    const { namespace, context } = splitOptions(options);
     const ns = this.resolveNs(namespace);
     const ring = this.rings.get(ns);
     if (!ring) {
@@ -170,7 +225,7 @@ export class SealedFields {
       this.warnDormantOnce(ns);
       return plaintext;
     }
-    return sealWithKeyring(plaintext, ring);
+    return sealWithKeyring(plaintext, ring, context);
   }
 
   /**
@@ -180,7 +235,8 @@ export class SealedFields {
    * authentication failure on a matching token throws — it is an integrity
    * problem, never plaintext.
    */
-  unseal(value: string, namespace?: string): string {
+  unseal(value: string, options?: SealOptions): string {
+    const { namespace, context } = splitOptions(options);
     const ns = this.resolveNs(namespace);
     const ring = this.rings.get(ns);
     if (parseToken(value)) {
@@ -193,11 +249,32 @@ export class SealedFields {
         this.warnDormantOnce(ns);
         return value;
       }
-      return unsealWithKeyring(value, ring, ns, this.onUnknownVersion);
+      try {
+        return unsealWithKeyring(value, ring, ns, this.onUnknownVersion, context);
+      } catch (err) {
+        // Only a GCM auth failure can mean "sealed before binding". Our own
+        // errors (unknown version, too short) would repeat, so rethrow.
+        if (context === null || !this.contextFallback || err instanceof SealedFieldsError) throw err;
+        let out: string;
+        try {
+          out = unsealWithKeyring(value, ring, ns, this.onUnknownVersion, null);
+        } catch {
+          throw err;
+        }
+        this.noteUnboundRead(ns);
+        return out;
+      }
     }
-    if (ring && this.legacy.length > 0) {
+    if (ring && this.legacy.length > 0 && this.legacy.some((f) => matchLegacy(value, f))) {
+      // Legacy formats have no AAD, so they cannot carry a binding.
+      if (context !== null && !this.contextFallback) {
+        throw new SealedFieldsError("unseal: legacy token cannot be bound to a context (enable contextFallback to migrate).");
+      }
       const legacy = tryLegacyFormats(value, this.legacy, ring);
-      if (legacy !== null) return legacy;
+      if (legacy !== null) {
+        if (context !== null) this.noteUnboundRead(ns);
+        return legacy;
+      }
     }
     if (this.plaintext === "reject") {
       throw new SealedFieldsError(`unseal: value is not a sealed token (plaintext: "reject").`);
@@ -205,16 +282,33 @@ export class SealedFields {
     return value; // plaintext passthrough
   }
 
+  private noteUnboundRead(ns: string): void {
+    this.unboundReads++;
+    if (this.warnedFallback.has(ns)) return;
+    this.warnedFallback.add(ns);
+    this.logger.warn(
+      `[sealed-fields] namespace "${ns}": read a token with no context binding via contextFallback. ` +
+        `Re-encrypt to bind it; stats().unboundReads counts these reads.`,
+    );
+  }
+
+  /** Counters since this instance was created. unboundReads is the number of
+   *  reads that needed contextFallback; it should stay at zero before
+   *  fallback is turned off. Per instance and per process. */
+  stats(): { unboundReads: number } {
+    return { unboundReads: this.unboundReads };
+  }
+
   /** Seal only when a value is present. Convenience for nullable columns. */
-  maybeSeal(value: string | null | undefined, namespace?: string): string | null {
+  maybeSeal(value: string | null | undefined, options?: SealOptions): string | null {
     if (value == null || value === "") return null;
-    return this.seal(value, namespace);
+    return this.seal(value, options);
   }
 
   /** Unseal only when a value is present. */
-  maybeUnseal(value: string | null | undefined, namespace?: string): string | null {
+  maybeUnseal(value: string | null | undefined, options?: SealOptions): string | null {
     if (value == null || value === "") return null;
-    return this.unseal(value, namespace);
+    return this.unseal(value, options);
   }
 
   /**
@@ -258,7 +352,7 @@ export class SealedFields {
    *  merely look like tokens. Those are untrusted input, not ciphertext, and
    *  skipping them would store attacker-chosen values unencrypted. */
   sealRow<T extends Record<string, unknown>>(row: T, spec: FieldSpec, namespace?: string): T {
-    const { fields, jsonFields } = normalizeSpec(spec);
+    const { fields, jsonFields, context } = normalizeSpec(spec);
     const out: Record<string, unknown> = { ...row };
     for (const field of jsonFields) {
       const v = out[field];
@@ -267,7 +361,7 @@ export class SealedFields {
     for (const field of [...fields, ...jsonFields]) {
       const v = out[field];
       if (typeof v !== "string" || v.length === 0) continue;
-      out[field] = this.seal(v, namespace);
+      out[field] = this.seal(v, { namespace, context: context?.(field, row) });
     }
     return out as T;
   }
@@ -277,7 +371,7 @@ export class SealedFields {
     spec: FieldSpec,
     namespace?: string,
   ): { out: T; failures: number; attempts: number } {
-    const { fields, jsonFields } = normalizeSpec(spec);
+    const { fields, jsonFields, context } = normalizeSpec(spec);
     const out: Record<string, unknown> = { ...row };
     let failures = 0;
     let attempts = 0;
@@ -287,7 +381,7 @@ export class SealedFields {
       if (this.plaintext === "passthrough" && !looksSealed(v) && !this.legacy.some((f) => matchLegacy(v, f))) continue;
       attempts++;
       try {
-        out[field] = this.unseal(v, namespace);
+        out[field] = this.unseal(v, { namespace, context: context?.(field, row) });
       } catch (err) {
         // Never hand raw ciphertext to a caller: null is a safe sentinel the
         // UI renders as missing. unsealRows detects systemic failure below.

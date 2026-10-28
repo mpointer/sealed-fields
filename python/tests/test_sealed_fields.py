@@ -373,6 +373,11 @@ class TestCrossLanguage:
         assert sf.blind_index(ctx["value"], context=ctx["context"]) == ctx["hex"]
         trim = VECTORS["blindIndexTrim"]
         assert sf.blind_index(trim["value"]) == trim["hex"]
+        bound = VECTORS["contextTokens"]
+        for name, token in bound["tokens"].items():
+            assert sf.unseal(token, context=bound["context"]) == VECTORS["plaintext"], name
+            with pytest.raises(Exception):
+                sf.unseal(token)
 
 
 def test_short_canonical_token_rejected():
@@ -425,3 +430,82 @@ class TestPlaintextReject:
             make_sf(plaintext="deny")
         with pytest.raises(SealedFieldsError, match="dormant"):
             create_sealed_fields(namespaces={"PII": {}}, mode="dormant", plaintext="reject")
+
+
+class TestContextBinding:
+    def collect(self, **kw):
+        warnings: list[str] = []
+        return make_sf(logger=warnings.append, **kw), warnings
+
+    def test_round_trip_and_string_equals_one_part(self):
+        sf = make_sf()
+        assert sf.unseal(sf.seal("x", context=["users", "email"]), context=["users", "email"]) == "x"
+        assert sf.unseal(sf.seal("x", context="users.email"), context=["users.email"]) == "x"
+
+    def test_moved_or_downgraded_token_fails(self):
+        sf = make_sf()
+        token = sf.seal("x", context=["users", "email"])
+        for bad in (["users", "notes"], None, ["users.email"]):
+            with pytest.raises(Exception):
+                sf.unseal(token, context=bad)
+        with pytest.raises(Exception):
+            sf.unseal(sf.seal("x", context=["a.b", "c"]), context=["a", "b.c"])
+
+    def test_unbound_with_context_fails_without_fallback(self):
+        sf = make_sf()
+        with pytest.raises(Exception):
+            sf.unseal(sf.seal("x"), context="users.email")
+
+    def test_empty_context_and_bad_parts(self):
+        sf = make_sf()
+        plain = sf.seal("x")
+        assert sf.unseal(plain, context="") == "x"
+        assert sf.unseal(plain, context=[]) == "x"
+        with pytest.raises(SealedFieldsError):
+            sf.seal("x", context=["users", ""])
+        with pytest.raises(SealedFieldsError):
+            sf.seal("x", context="a\0b")
+
+    def test_rejects_non_boolean_fallback(self):
+        with pytest.raises(SealedFieldsError, match="boolean"):
+            make_sf(context_fallback="yes")
+
+    def test_fallback_counts_and_warns_once(self):
+        sf, warnings = self.collect(context_fallback=True)
+        unbound = sf.seal("x")
+        assert sf.unseal(unbound, context="users.email") == "x"
+        assert sf.unseal(unbound, context="users.email") == "x"
+        assert sf.unseal(sf.seal("y", context="users.email"), context="users.email") == "y"
+        assert sf.unseal(unbound) == "x"
+        assert sf.stats() == {"unbound_reads": 2}
+        assert len(warnings) == 1
+
+    def test_fallback_does_not_let_a_bound_token_move(self):
+        sf = make_sf(context_fallback=True)
+        token = sf.seal("x", context="users.email")
+        with pytest.raises(Exception):
+            sf.unseal(token, context="users.notes")
+        assert sf.stats()["unbound_reads"] == 0
+
+    def test_row_helpers(self):
+        spec = {"fields": ["email"], "context": lambda field, row: ["users", field, str(row["id"])]}
+        sf = make_sf(logger=lambda m: None)
+        a = sf.seal_row({"id": 1, "email": "a@x"}, spec)
+        b = sf.seal_row({"id": 2, "email": "b@x"}, spec)
+        assert sf.unseal_row(a, spec) == {"id": 1, "email": "a@x"}
+        assert sf.unseal_row({**b, "email": a["email"]}, spec) == {"id": 2, "email": None}
+        migrating = make_sf(context_fallback=True, logger=lambda m: None)
+        old = [{"id": i, "email": migrating.seal("e")} for i in range(5)]
+        migrating.unseal_rows(old, spec)
+        assert migrating.stats()["unbound_reads"] == 5
+
+    def test_legacy_needs_fallback_with_context(self):
+        key = base64.urlsafe_b64decode(KEY_A + "=" * (-len(KEY_A) % 4))
+        token = TestLegacy._iv_ct_tag("old", key)
+        strict = make_sf(legacy=["iv-ct-tag"])
+        with pytest.raises(SealedFieldsError, match="legacy"):
+            strict.unseal(token, context="t.c")
+        assert strict.unseal(token) == "old"
+        migrating = make_sf(legacy=["iv-ct-tag"], context_fallback=True, logger=lambda m: None)
+        assert migrating.unseal(token, context="t.c") == "old"
+        assert migrating.stats()["unbound_reads"] == 1
