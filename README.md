@@ -52,6 +52,8 @@ const sf = createSealedFields({
 
 New writes seal under v2. Old rows keep reading under v1. Re-encrypt at your leisure with a backfill script, then drop the retired key. If a token names a version you no longer hold, `unseal` throws instead of returning ciphertext. The `onUnknownVersion: "passthrough"` option exists for the migration window only.
 
+Rotate well before one key has sealed about 4 billion (2^32) values. Each seal uses a random 96-bit nonce, and NIST SP 800-38D caps random-nonce GCM at 2^32 encryptions per key, because past that point a repeated nonce becomes likely enough to matter. A repeated nonce under one key leaks the XOR of the two plaintexts and lets an attacker forge tokens. Most applications never get close, but a hot column with frequent rewrites can.
+
 ## Key namespaces limit rotation blast radius
 
 Rotating your PII key after an incident should not also invalidate every stored TOTP secret, and vice versa. Namespaces are separate keyrings under one instance:
