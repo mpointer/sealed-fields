@@ -1,6 +1,6 @@
 # Design note: binding sealed values to their row and column
 
-Status: proposal, not implemented. Target: 0.6.0.
+Status: accepted, not implemented. Target: 0.6.0.
 
 ## Problem
 
@@ -36,8 +36,8 @@ tampered token.
 ### API
 
 ```ts
-sf.seal(ssn, { namespace: "PII", context: ["users", "ssn", userId] });
-sf.unseal(token, { namespace: "PII", context: ["users", "ssn", userId] });
+sf.seal(ssn, { namespace: "PII", context: ["users", "ssn"] });
+sf.unseal(token, { namespace: "PII", context: ["users", "ssn"] });
 ```
 
 - The second argument becomes `string | { namespace?, context? }`. A string
@@ -57,13 +57,15 @@ sf.unseal(token, { namespace: "PII", context: ["users", "ssn", userId] });
 
 ### What to bind
 
-- **Table and column: always.** Known at every call site, never changes,
+- **Table and column: the documented default.** Known at every call site, never changes,
   stops cross-column swaps and copying between tables.
-- **Row id: only when it exists before the write.** It stops cross-row
+- **Row id: an opt-in upgrade, not the default.** It stops cross-row
   swaps, which is the bigger risk. But a database-generated id
   (`SERIAL`, auto-increment) does not exist until after the `INSERT`. Then
   the choice is insert-then-update, or binding table and column only.
-  Client-generated ids (UUIDs) make this free. The README will say so.
+  Insert-then-update is easy to get wrong, so the README will not
+  recommend row ids by default. It will present them as the upgrade for
+  tables with client-generated ids (UUIDs), where binding them is free.
 - A row id in the context means the value must be resealed if the id ever
   changes (merges, re-keys). Rare, but worth a line in the docs.
 
@@ -79,9 +81,15 @@ break them on day one.
 - New instance option `contextFallback: true` (Python `context_fallback=True`).
   When a context is supplied and decryption under it fails, retry with the
   plain version AAD. If that succeeds, return the value and log once per
-  namespace that unbound tokens are still being read.
+  namespace that unbound tokens are still being read, and increment a
+  counter (below).
 - Writes always bind. A normal re-encrypt backfill (read with fallback,
   write bound) migrates the table.
+- `sf.stats()` (Python `sf.stats()`) returns `{ unboundReads }`, the number
+  of fallback decrypts since the instance was created. A backfill job or a
+  health check can confirm it stays at zero over a full read cycle before
+  fallback is turned off. The counter is per instance and per process, so
+  read it on every instance, or ship it to your metrics.
 - After the backfill, remove `contextFallback`. From then on an unbound or
   moved token fails like any tampered value. The row helpers null it and
   count it toward `SystemicUnsealError`.
@@ -125,12 +133,9 @@ About a day for both languages: options plumbing, the AAD change in
 vectors, tests that a moved token fails, and docs. No change to the wire
 format or `isSealed`.
 
-## Open questions
+## Decisions
 
-1. Should the README recommend row ids by default, or table and column by
-   default with row ids as the upgrade? I lean toward table and column by
-   default, because the auto-increment case is common and insert-then-update
-   is easy to get wrong.
-2. Should the fallback log only once, or also expose a counter? A counter
-   (`sf.stats().unboundReads`) would let a backfill job prove it's done
-   before fallback is turned off.
+1. The README recommends table and column binding by default. Row ids are
+   documented as an opt-in upgrade for client-generated ids.
+2. The fallback logs once per namespace and also exposes the
+   `stats().unboundReads` counter.
