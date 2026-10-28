@@ -2,6 +2,26 @@
 
 Both packages share one version number and one `v*` tag.
 
+## 0.4.0 (unreleased)
+
+Both packages. **Breaking:** `sealRow` / `seal_row` now seal every listed
+string, so call them exactly once per write.
+
+- `sealRow` no longer skips values that look sealed. Token-shaped user input
+  was stored unencrypted, nulled on read, and five on one page tripped
+  `SystemicUnsealError` for every viewer. This also fixes `jsonFields` being
+  double-sealed when a sealed row was passed in again. Read-modify-write
+  paths that re-pass rows read from the database will now double-seal.
+- `unsealRow` / `unsealRows` decode enabled legacy formats instead of
+  returning raw legacy ciphertext, and count legacy failures toward
+  systemic detection.
+- TS: the constructor validates `mode`, `legacy` and `onUnknownVersion`. An
+  unrecognized `mode` (for example `"STRICT"`) used to write plaintext.
+- `unseal` rejects tokens shorter than nonce + tag. TS pins
+  `authTagLength: 16`, because Node 20/22 otherwise accept truncated GCM tags.
+- README: audit existing plaintext for token-shaped values before enabling
+  a key or legacy decoder.
+
 ## 0.3.0 (2026-10-19)
 
 Both packages:

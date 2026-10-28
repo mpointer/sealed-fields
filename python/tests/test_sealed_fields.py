@@ -154,11 +154,20 @@ class TestRows:
         assert out["extra"] == "untouched"
         assert row["name"] == "Ada"
 
-    def test_no_double_seal(self):
+    def test_token_shaped_input_is_sealed_not_trusted(self):
+        # Regression: seal_row used to skip values that looked sealed, storing
+        # attacker-chosen "tokens" unencrypted and tripping SystemicUnsealError.
         sf = make_sf()
-        once = sf.seal_row({"name": "Ada"}, self.FIELDS)
-        twice = sf.seal_row(once, self.FIELDS)
-        assert twice["name"] == once["name"]
+        evil = "v1:" + base64.urlsafe_b64encode(os.urandom(30)).decode().rstrip("=")
+        assert is_sealed(evil)
+        out = sf.seal_row({"name": evil}, self.FIELDS)
+        assert out["name"] != evil
+        assert sf.unseal_row(out, self.FIELDS)["name"] == evil
+        rows = [
+            sf.seal_row({"name": "v1:" + base64.urlsafe_b64encode(os.urandom(30)).decode()}, self.FIELDS)
+            for _ in range(5)
+        ]
+        sf.unseal_rows(rows, self.FIELDS)  # must not raise
 
     def test_mixed_plaintext_rows_mid_migration(self):
         sf = make_sf()
@@ -245,6 +254,19 @@ class TestLegacy:
         token = self._iv_ct_tag("x", self._key_bytes(KEY_A))
         assert sf.unseal(token) == token
 
+    def test_row_helpers_decode_legacy_tokens(self):
+        sf = make_sf(legacy=["iv-ct-tag", "v1-iv-tag-ct"], logger=lambda m: None)
+        k = self._key_bytes(KEY_A)
+        row = {"a": self._iv_ct_tag("one", k), "b": self._v1_iv_tag_ct("two", k)}
+        assert sf.unseal_row(row, ["a", "b"]) == {"a": "one", "b": "two"}
+
+    def test_row_helper_legacy_failures_count_as_systemic(self):
+        sf = make_sf(legacy=["iv-ct-tag"], logger=lambda m: None)
+        rows = [{"a": self._iv_ct_tag(f"p{i}", self._key_bytes(KEY_B))} for i in range(5)]
+        assert sf.unseal_row(rows[0], ["a"])["a"] is None
+        with pytest.raises(SystemicUnsealError):
+            sf.unseal_rows(rows, ["a"])
+
     def test_ordinary_colon_text_not_mistaken(self):
         sf = make_sf(legacy=["iv-ct-tag", "v1-iv-tag-ct"])
         for s in ["a:b:c", "12:30:45", "v1:looks:like:legacy"]:
@@ -323,3 +345,10 @@ class TestCrossLanguage:
         for name, token in VECTORS["tokens"].items():
             assert sf.unseal(token) == VECTORS["plaintext"], name
         assert sf.blind_index(VECTORS["blindIndex"]["value"]) == VECTORS["blindIndex"]["hex"]
+
+
+def test_short_canonical_token_rejected():
+    sf = make_sf()
+    for t in ["v1:AAAAAA", "v1:AAAAAAAAAAA", "v1:" + "A" * 36]:
+        with pytest.raises(SealedFieldsError, match="too short"):
+            sf.unseal(t)

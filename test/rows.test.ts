@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { SystemicUnsealError, createSealedFields, generateKey, isSealed } from "../src/index.js";
 
@@ -23,12 +24,20 @@ describe("sealRow", () => {
     expect(row.name).toBe("Ada"); // input not mutated
   });
 
-  it("does not double-seal an already sealed value", () => {
+  it("seals token-shaped user input instead of trusting it", () => {
+    // Regression: sealRow used to skip values that looked sealed, so a user
+    // could store attacker-chosen "tokens" unencrypted. Each one failed auth
+    // on read, and five on a page tripped SystemicUnsealError for everyone.
     const sf = makeSf();
-    const once = sf.sealRow({ name: "Ada" }, FIELDS);
-    const twice = sf.sealRow(once, FIELDS);
-    expect(twice.name).toBe(once.name);
-    expect(sf.unsealRow(twice, FIELDS).name).toBe("Ada");
+    const evil = "v1:" + randomBytes(30).toString("base64url");
+    expect(isSealed(evil)).toBe(true);
+    const out = sf.sealRow({ name: evil }, FIELDS);
+    expect(out.name).not.toBe(evil);
+    expect(sf.unsealRow(out, FIELDS).name).toBe(evil);
+    const rows = Array.from({ length: 5 }, () =>
+      sf.sealRow({ name: "v1:" + randomBytes(30).toString("base64url") }, FIELDS),
+    );
+    expect(() => sf.unsealRows(rows, FIELDS)).not.toThrow();
   });
 });
 

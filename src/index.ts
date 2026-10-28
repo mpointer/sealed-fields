@@ -7,7 +7,7 @@ import {
   type NamespaceConfig,
 } from "./keyring.js";
 import { looksSealed, parseToken, sealWithKeyring, unsealWithKeyring } from "./seal.js";
-import { tryLegacyFormats, type LegacyFormat } from "./legacy.js";
+import { LEGACY_FORMATS, matchLegacy, tryLegacyFormats, type LegacyFormat } from "./legacy.js";
 import {
   KeyNotConfiguredError,
   SealedFieldsError,
@@ -95,9 +95,22 @@ export class SealedFields {
       !(typeof config.blindIndexKey === "string" && config.blindIndexKey.trim() === "")
         ? parseKey(config.blindIndexKey, "blindIndexKey")
         : null;
+    // Validate at runtime too: JS callers and env-driven config bypass the
+    // types, and an unrecognized mode must never fall through to plaintext.
     this.mode = config.mode ?? "strict";
+    if (this.mode !== "strict" && this.mode !== "dormant") {
+      throw new SealedFieldsError(`mode must be "strict" or "dormant" (got "${String(this.mode)}").`);
+    }
     this.legacy = config.legacy ?? [];
+    for (const f of this.legacy) {
+      if (!LEGACY_FORMATS.includes(f)) throw new SealedFieldsError(`unknown legacy format "${String(f)}".`);
+    }
     this.onUnknownVersion = config.onUnknownVersion ?? "throw";
+    if (this.onUnknownVersion !== "throw" && this.onUnknownVersion !== "passthrough") {
+      throw new SealedFieldsError(
+        `onUnknownVersion must be "throw" or "passthrough" (got "${String(this.onUnknownVersion)}").`,
+      );
+    }
     this.logger = config.logger ?? console;
   }
 
@@ -203,7 +216,10 @@ export class SealedFields {
   }
 
   /** Seal the listed fields on a row (insert/update payload). Returns a
-   *  shallow copy; null/empty/non-string/already-sealed values are skipped. */
+   *  shallow copy; null/empty/non-string values are skipped. Call exactly
+   *  once per write: every listed string is sealed, including values that
+   *  merely look like tokens. Those are untrusted input, not ciphertext, and
+   *  skipping them would store attacker-chosen values unencrypted. */
   sealRow<T extends Record<string, unknown>>(row: T, spec: FieldSpec, namespace?: string): T {
     const { fields, jsonFields } = normalizeSpec(spec);
     const out: Record<string, unknown> = { ...row };
@@ -214,7 +230,6 @@ export class SealedFields {
     for (const field of [...fields, ...jsonFields]) {
       const v = out[field];
       if (typeof v !== "string" || v.length === 0) continue;
-      if (looksSealed(v)) continue;
       out[field] = this.seal(v, namespace);
     }
     return out as T;
@@ -232,7 +247,7 @@ export class SealedFields {
     for (const field of [...fields, ...jsonFields]) {
       const v = out[field];
       if (typeof v !== "string" || v.length === 0) continue;
-      if (!looksSealed(v)) continue;
+      if (!looksSealed(v) && !this.legacy.some((f) => matchLegacy(v, f))) continue;
       attempts++;
       try {
         out[field] = this.unseal(v, namespace);
