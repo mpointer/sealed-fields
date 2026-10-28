@@ -14,6 +14,7 @@ const VECTORS = JSON.parse(readFileSync(new URL("./vectors.json", import.meta.ur
   tokens: Record<string, string>;
   blindIndex: { key: string; value: string; hex: string };
   blindIndexContext: { key: string; context: string; value: string; hex: string };
+  blindIndexTrim: { key: string; value: string; hex: string };
 };
 
 describe("cross-language wire compatibility", () => {
@@ -28,6 +29,7 @@ describe("cross-language wire compatibility", () => {
     expect(sf.blindIndex(VECTORS.blindIndex.value)).toBe(VECTORS.blindIndex.hex);
     const ctx = VECTORS.blindIndexContext;
     expect(sf.blindIndex(ctx.value, { context: ctx.context })).toBe(ctx.hex);
+    expect(sf.blindIndex(VECTORS.blindIndexTrim.value)).toBe(VECTORS.blindIndexTrim.hex);
   });
 
   it("our own output stays self-consistent under the shared key", () => {

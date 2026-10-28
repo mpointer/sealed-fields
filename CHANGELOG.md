@@ -21,6 +21,11 @@ Python:
 - Tokens and version labels use `fullmatch`, so `"v1:...\n"` is no longer
   treated as sealed (TS already rejected it).
 - `namespace=""` is an unknown namespace, as in TS, not the default.
+- **Token change:** the default `blind_index` trim now strips exactly the
+  characters JS `String.prototype.trim()` strips. Before, a value starting
+  or ending with `\x1c`-`\x1f`, `\x85` or `\ufeff` got a different token in
+  Python than in TS. Python-written index rows for such values need
+  recomputing; all other tokens are unchanged. Shared vector added.
 
 ## 0.4.0 (2026-10-28)
 

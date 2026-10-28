@@ -86,7 +86,7 @@ const row = await db.query.users.findFirst({
 
 Only index high-entropy values: emails, usernames, phone numbers. Never index a low-entropy field like state, zip code, or birth year. A deterministic MAC over a small domain is trivially dictionary-attacked.
 
-`normalize` can also be a function (`{ normalize: (v) => v.trim().toUpperCase() }`) when existing index tokens were built under a different rule. Every writer and reader of a column must use the same normalization or lookups silently miss. The default does not apply Unicode normalization. If input can arrive decomposed (NFD, common from macOS and iOS), use `(v) => v.normalize("NFC").trim().toLowerCase()`.
+`normalize` can also be a function (`{ normalize: (v) => v.trim().toUpperCase() }`) when existing index tokens were built under a different rule. Every writer and reader of a column must use the same normalization or lookups silently miss. The default trims exactly what JS `String.prototype.trim()` trims, in both languages. It does not apply Unicode normalization. If input can arrive decomposed (NFD, common from macOS and iOS), use `(v) => v.normalize("NFC").trim().toLowerCase()`.
 
 Pass `context` to keep columns apart: `sf.blindIndex(email, { context: "users.email" })`. Without it, the same email produces the same token in every table, so anyone reading the database can join `users` to `contacts` on the index column without any key. Adding a context changes the token, so use it on new columns, or backfill the index when you add it to an existing one.
 

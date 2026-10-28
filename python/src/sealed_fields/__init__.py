@@ -118,6 +118,14 @@ def is_sealed(value: Any) -> bool:
     return len(raw) >= NONCE_BYTES + TAG_BYTES  # empty plaintext is valid GCM
 
 
+# String.prototype.trim()'s set. str.strip() differs (it also strips
+# \x1c-\x1f and \x85, and keeps \ufeff), which would split blind-index tokens.
+_JS_WHITESPACE = (
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
+    "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+
+
 def generate_key() -> str:
     """Fresh 32-byte key, base64url without padding. Suitable for any key slot."""
     return base64.urlsafe_b64encode(secrets.token_bytes(KEY_BYTES)).decode("ascii").rstrip("=")
@@ -366,7 +374,7 @@ class SealedFields:
         if callable(normalize):
             normalized = normalize(value)
         elif normalize:
-            normalized = value.strip().lower()
+            normalized = value.strip(_JS_WHITESPACE).lower()
         else:
             normalized = value
         mac = hmac_mod.new(self._index_key, digestmod=hashlib.sha256)

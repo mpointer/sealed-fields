@@ -371,6 +371,8 @@ class TestCrossLanguage:
         assert sf.blind_index(VECTORS["blindIndex"]["value"]) == VECTORS["blindIndex"]["hex"]
         ctx = VECTORS["blindIndexContext"]
         assert sf.blind_index(ctx["value"], context=ctx["context"]) == ctx["hex"]
+        trim = VECTORS["blindIndexTrim"]
+        assert sf.blind_index(trim["value"]) == trim["hex"]
 
 
 def test_short_canonical_token_rejected():
