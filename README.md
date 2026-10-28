@@ -86,7 +86,9 @@ const row = await db.query.users.findFirst({
 
 Only index high-entropy values: emails, usernames, phone numbers. Never index a low-entropy field like state, zip code, or birth year. A deterministic MAC over a small domain is trivially dictionary-attacked.
 
-`normalize` can also be a function (`{ normalize: (v) => v.trim().toUpperCase() }`) when existing index tokens were built under a different rule. Every writer and reader of a column must use the same normalization or lookups silently miss.
+`normalize` can also be a function (`{ normalize: (v) => v.trim().toUpperCase() }`) when existing index tokens were built under a different rule. Every writer and reader of a column must use the same normalization or lookups silently miss. The default does not apply Unicode normalization. If input can arrive decomposed (NFD, common from macOS and iOS), use `(v) => v.normalize("NFC").trim().toLowerCase()`.
+
+Pass `context` to keep columns apart: `sf.blindIndex(email, { context: "users.email" })`. Without it, the same email produces the same token in every table, so anyone reading the database can join `users` to `contacts` on the index column without any key. Adding a context changes the token, so use it on new columns, or backfill the index when you add it to an existing one.
 
 ## Row helpers
 
@@ -148,7 +150,7 @@ Namespaces are listed explicitly. The helper never scans the environment, so a t
 
 ## Utilities
 
-`generateKey()` returns a fresh 32-byte key as base64url. `hashToken(t)` is a SHA-256 hex digest for one-time tokens (magic links, verification codes): store the hash, send the plaintext, and a leaked database cannot consume pending tokens. `isSealed(v)` is a structural check for the canonical format.
+`generateKey()` returns a fresh 32-byte key as base64url. Keys are accepted as 64-char hex or 43-char base64/base64url (a trailing `=` is fine, so `openssl rand -base64 32` works). Keys must be random. A 43-character passphrase can pass the shape check, but it is not a key. `hashToken(t)` is a SHA-256 hex digest for one-time tokens (magic links, verification codes): store the hash, send the plaintext, and a leaked database cannot consume pending tokens. `isSealed(v)` is a structural check for the canonical format.
 
 ## Cross-language
 

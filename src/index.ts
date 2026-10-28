@@ -74,7 +74,7 @@ export class SealedFields {
   private readonly legacy: readonly LegacyFormat[];
   private readonly onUnknownVersion: "throw" | "passthrough";
   private readonly logger: SealedFieldsLogger;
-  private warnedDormant = false;
+  private readonly warnedDormant = new Set<string>();
 
   constructor(config: SealedFieldsConfig) {
     const names = Object.keys(config.namespaces);
@@ -126,8 +126,8 @@ export class SealedFields {
   }
 
   private warnDormantOnce(ns: string): void {
-    if (this.warnedDormant) return;
-    this.warnedDormant = true;
+    if (this.warnedDormant.has(ns)) return;
+    this.warnedDormant.add(ns);
     this.logger.warn(
       `[sealed-fields] SECURITY: namespace "${ns}" has no key configured — sealed columns are ` +
         `being written in PLAINTEXT (mode: "dormant"). Provision a key before production traffic.`,
@@ -203,16 +203,32 @@ export class SealedFields {
    * deterministic MAC over a small domain is trivially dictionary-attacked.
    *
    * Normalization (default on): trim + Unicode-aware lowercase, so
-   * "Alice@Example.com " and "alice@example.com" index identically.
+   * "Alice@Example.com " and "alice@example.com" index identically. It does
+   * not apply Unicode normalization; pass `normalize: (s) =>
+   * s.normalize("NFC").trim().toLowerCase()` if inputs may arrive as NFD.
+   *
+   * `context` (opt-in) separates columns: the same email indexed under
+   * "users.email" and "contacts.email" yields unrelated tokens, so a database
+   * reader cannot join the two tables on index equality. The MAC input is
+   * `context || 0x00 || value`. Omitting it keeps pre-0.5 tokens unchanged.
    */
-  blindIndex(value: string, options?: { normalize?: boolean | ((value: string) => string) }): string {
+  blindIndex(
+    value: string,
+    options?: { normalize?: boolean | ((value: string) => string); context?: string },
+  ): string {
     if (!this.indexKey) {
       throw new KeyNotConfiguredError("blindIndexKey is not configured; cannot build a blind index.");
     }
     const normalize = options?.normalize;
     const normalized =
       typeof normalize === "function" ? normalize(value) : normalize === false ? value : value.trim().toLowerCase();
-    return createHmac("sha256", this.indexKey).update(normalized, "utf8").digest("hex");
+    const context = options?.context;
+    const mac = createHmac("sha256", this.indexKey);
+    if (context != null && context !== "") {
+      if (context.includes("\0")) throw new SealedFieldsError("blindIndex context must not contain NUL.");
+      mac.update(context, "utf8").update("\0", "utf8");
+    }
+    return mac.update(normalized, "utf8").digest("hex");
   }
 
   /** Seal the listed fields on a row (insert/update payload). Returns a

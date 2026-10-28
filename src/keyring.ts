@@ -32,12 +32,15 @@ export function parseKey(raw: string | Buffer, label: string): Buffer {
   }
   const s = raw.trim();
   if (/^[0-9a-fA-F]{64}$/.test(s)) return Buffer.from(s, "hex");
-  // Node's base64 decoder accepts both standard and url-safe alphabets.
-  const decoded = Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  if (decoded.length === KEY_BYTES) return decoded;
+  // 32 bytes encode to exactly 43 base64 chars plus optional "=". Check the
+  // shape strictly: Node's decoder silently skips invalid characters, so a
+  // lenient check would accept typos and arbitrary strings as keys.
+  if (/^[A-Za-z0-9+/_-]{43}=?$/.test(s)) {
+    return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  }
   throw new KeyNotConfiguredError(
-    `${label} must be a ${KEY_BYTES}-byte key as 64-char hex, base64, or base64url ` +
-      `(decoded to ${decoded.length} bytes). Generate one with generateKey().`,
+    `${label} must be a ${KEY_BYTES}-byte key as 64-char hex or 43-char base64/base64url. ` +
+      `Keys must be random; a passphrase is not a key. Generate one with generateKey().`,
   );
 }
 

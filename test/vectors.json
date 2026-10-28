@@ -1,5 +1,5 @@
 {
-  "comment": "Shared cross-language vectors. Both test suites (TypeScript: test/cross-language.test.ts, Python: python/tests/test_cross_language.py) must decode every token here. key is bytes(range(32)) in base64; blindIndexKey likewise.",
+  "comment": "Shared cross-language vectors. Both test suites (TypeScript: test/cross-language.test.ts, Python: python/tests/test_sealed_fields.py) must decode every token here. key is bytes(range(32)) in base64; blindIndexKey likewise.",
   "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
   "plaintext": "cross-language sealed value — 你好",
   "tokens": {
@@ -12,5 +12,11 @@
     "value": "  Alice@Example.COM ",
     "normalized": "alice@example.com",
     "hex": "a59fc578d4cb46faab1d6eb348e7c74b33b85122d6459fdb7bf5654b333acab4"
+  },
+  "blindIndexContext": {
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "context": "users.email",
+    "value": "  Alice@Example.COM ",
+    "hex": "b3f7f63cf19e94a92fcfaa97da70a92b676c688e1a4c368c1476495456f79ab3"
   }
 }

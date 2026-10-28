@@ -87,16 +87,15 @@ def _parse_key(raw: str | bytes, label: str) -> bytes:
     s = raw.strip()
     if re.fullmatch(r"[0-9a-fA-F]{64}", s):
         return bytes.fromhex(s)
-    try:
-        normalized = s.replace("-", "+").replace("_", "/")
-        decoded = base64.b64decode(normalized + "=" * (-len(normalized) % 4), validate=False)
-        if len(decoded) == KEY_BYTES:
-            return decoded
-    except (binascii.Error, ValueError):
-        pass
+    # 32 bytes encode to exactly 43 base64 chars plus optional "=". Check the
+    # shape strictly so typos and arbitrary strings are never accepted as keys.
+    if re.fullmatch(r"[A-Za-z0-9+/_-]{43}=?", s):
+        normalized = s.rstrip("=").replace("-", "+").replace("_", "/")
+        return base64.b64decode(normalized + "=")
     raise KeyNotConfiguredError(
-        f"{label} must be a {KEY_BYTES}-byte key as 64-char hex, base64, or "
-        f"base64url. Generate one with generate_key()."
+        f"{label} must be a {KEY_BYTES}-byte key as 64-char hex or 43-char "
+        f"base64/base64url. Keys must be random; a passphrase is not a key. "
+        f"Generate one with generate_key()."
     )
 
 
@@ -109,7 +108,7 @@ def is_sealed(value: Any) -> bool:
     """True when a value structurally matches the canonical sealed format."""
     if not isinstance(value, str):
         return False
-    m = _TOKEN_RE.match(value)
+    m = _TOKEN_RE.fullmatch(value)
     if not m:
         return False
     try:
@@ -142,13 +141,13 @@ def _build_keyring(cfg: Mapping[str, Any], namespace: str) -> _Keyring | None:
     if raw_key is None or (isinstance(raw_key, str) and raw_key.strip() == ""):
         return None
     active_version = (cfg.get("version") or "v1").strip() or "v1"
-    if not _VERSION_RE.match(active_version):
+    if not _VERSION_RE.fullmatch(active_version):
         raise SealedFieldsError(
             f'namespace "{namespace}": version must look like "v1", "v2", ... (got "{active_version}").'
         )
     keys = {active_version: _parse_key(raw_key, f'namespace "{namespace}" key')}
     for ver, raw in (cfg.get("retired") or {}).items():
-        if not _VERSION_RE.match(ver):
+        if not _VERSION_RE.fullmatch(ver):
             raise SealedFieldsError(
                 f'namespace "{namespace}": retired key version "{ver}" must look like "v1", "v2", ...'
             )
@@ -227,12 +226,12 @@ class SealedFields:
             raise SealedFieldsError('on_unknown_version must be "throw" or "passthrough".')
         self._on_unknown_version = on_unknown_version
         self._warn = logger or (lambda m: print(m))
-        self._warned_dormant = False
+        self._warned_dormant: set[str] = set()
 
     # -- internals ---------------------------------------------------------
 
     def _resolve_ns(self, namespace: str | None) -> str:
-        ns = namespace or self._default_ns
+        ns = namespace if namespace is not None else self._default_ns
         if ns is None:
             raise SealedFieldsError(
                 "no namespace given and no default_namespace configured (multiple namespaces exist)."
@@ -242,9 +241,9 @@ class SealedFields:
         return ns
 
     def _warn_dormant_once(self, ns: str) -> None:
-        if self._warned_dormant:
+        if ns in self._warned_dormant:
             return
-        self._warned_dormant = True
+        self._warned_dormant.add(ns)
         self._warn(
             f'[sealed-fields] SECURITY: namespace "{ns}" has no key configured — sealed '
             f'columns are being written in PLAINTEXT (mode: "dormant"). '
@@ -297,7 +296,7 @@ class SealedFields:
     def unseal(self, value: str, namespace: str | None = None) -> str:
         ns = self._resolve_ns(namespace)
         ring = self._rings[ns]
-        m = _TOKEN_RE.match(value)
+        m = _TOKEN_RE.fullmatch(value)
         if m:
             if ring is None:
                 if self._mode == "strict":
@@ -334,7 +333,11 @@ class SealedFields:
         return self.unseal(value, namespace)
 
     def blind_index(
-        self, value: str, *, normalize: bool | Callable[[str], str] = True
+        self,
+        value: str,
+        *,
+        normalize: bool | Callable[[str], str] = True,
+        context: str | None = None,
     ) -> str:
         """Deterministic HMAC-SHA256 lookup token for an equality query on an
         otherwise-sealed column. ONLY for high-entropy values (email, username,
@@ -347,6 +350,14 @@ class SealedFields:
         ``lambda s: s.strip().casefold()`` when existing index tokens were
         built with casefold. Whatever you pick, every writer and every reader
         of a column must use the same normalization, or lookups silently miss.
+        No Unicode normalization is applied; pass
+        ``lambda s: unicodedata.normalize("NFC", s).strip().lower()`` if inputs
+        may arrive as NFD.
+
+        ``context`` (opt-in) separates columns: the MAC input becomes
+        ``context || 0x00 || value``, so the same email indexed under
+        "users.email" and "contacts.email" cannot be joined on equality.
+        Omitting it keeps pre-0.5 tokens unchanged.
         """
         if self._index_key is None:
             raise KeyNotConfiguredError(
@@ -358,7 +369,13 @@ class SealedFields:
             normalized = value.strip().lower()
         else:
             normalized = value
-        return hmac_mod.new(self._index_key, normalized.encode("utf-8"), hashlib.sha256).hexdigest()
+        mac = hmac_mod.new(self._index_key, digestmod=hashlib.sha256)
+        if context:
+            if "\0" in context:
+                raise SealedFieldsError("blind_index context must not contain NUL.")
+            mac.update(context.encode("utf-8") + b"\0")
+        mac.update(normalized.encode("utf-8"))
+        return mac.hexdigest()
 
     # -- row helpers ---------------------------------------------------------
 

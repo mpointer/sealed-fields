@@ -2,7 +2,27 @@
 
 Both packages share one version number and one `v*` tag.
 
-## 0.4.0 (unreleased)
+## 0.5.0 (unreleased)
+
+Both packages:
+
+- `blindIndex` / `blind_index` take an opt-in `context` for separating
+  columns. The MAC input becomes `context || 0x00 || value`. Without a
+  context, tokens are unchanged. Shared vector added.
+- Key parsing is strict: 64-char hex or 43-char base64/base64url with an
+  optional trailing `=`. TS used to skip invalid characters while decoding,
+  so typo'd strings could be accepted as keys.
+- Dormant mode warns once per namespace instead of once per instance.
+- Docs: blind indexes apply no Unicode normalization; README shows an NFC
+  normalizer.
+
+Python:
+
+- Tokens and version labels use `fullmatch`, so `"v1:...\n"` is no longer
+  treated as sealed (TS already rejected it).
+- `namespace=""` is an unknown namespace, as in TS, not the default.
+
+## 0.4.0 (2026-10-28)
 
 Both packages. **Breaking:** `sealRow` / `seal_row` now seal every listed
 string, so call them exactly once per write.

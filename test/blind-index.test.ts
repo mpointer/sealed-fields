@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { KeyNotConfiguredError, createSealedFields, generateKey } from "../src/index.js";
+import { KeyNotConfiguredError, SealedFieldsError, createSealedFields, generateKey } from "../src/index.js";
 
 const KEY = generateKey();
 const INDEX_KEY = generateKey();
@@ -13,6 +13,16 @@ function makeSf() {
 }
 
 describe("blindIndex", () => {
+  it("context separates columns and leaves context-free tokens unchanged", () => {
+    const sf = makeSf();
+    const plain = sf.blindIndex("alice@example.com");
+    const users = sf.blindIndex("alice@example.com", { context: "users.email" });
+    const contacts = sf.blindIndex("alice@example.com", { context: "contacts.email" });
+    expect(new Set([plain, users, contacts]).size).toBe(3);
+    expect(sf.blindIndex("alice@example.com", { context: "" })).toBe(plain);
+    expect(() => sf.blindIndex("x", { context: "a\0b" })).toThrow(SealedFieldsError);
+  });
+
   it("is deterministic for equal values", () => {
     const sf = makeSf();
     expect(sf.blindIndex("alice@example.com")).toBe(sf.blindIndex("alice@example.com"));
