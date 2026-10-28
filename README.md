@@ -128,6 +128,8 @@ Reads understand the old tokens. Every write produces the canonical format. A le
 
 **Audit plaintext before turning on a key or a legacy decoder.** Plaintext written in dormant mode, written before 0.4.0, or still sitting in a mixed table may contain user input shaped like a token. Once a key or decoder is on, those values fail authentication. The row helpers null them, and enough of them on one page trip `SystemicUnsealError`. Before enabling, scan the column with `isSealed` (plus your legacy shape). Re-seal or clear any row that matches a token shape but doesn't decrypt under your keys.
 
+**Close the door once the backfill is done.** By default `unseal` passes plaintext through, which also lets a value written around the library, by a raw SQL fix or a second service, sit unencrypted forever without anyone noticing. After every row is sealed, set `plaintext: "reject"`. Then `unseal` throws on a non-token value, and the row helpers null it and count it toward `SystemicUnsealError`. It cannot be combined with `mode: "dormant"`, because dormant mode writes plaintext.
+
 ## Fail closed by default
 
 With no key configured, `seal` throws. If you need the deploy window where code ships before keys are provisioned, opt in explicitly:

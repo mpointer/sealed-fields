@@ -2,6 +2,16 @@
 
 Both packages share one version number and one `v*` tag.
 
+## Unreleased
+
+Both packages:
+
+- New `plaintext: "reject"` / `plaintext="reject"` option for fully migrated
+  columns. `unseal` throws on a non-token value instead of passing it
+  through, and the row helpers null it and count it toward
+  `SystemicUnsealError`. Default stays `"passthrough"`. Rejected with
+  `mode: "dormant"`.
+
 ## 0.5.0 (2026-10-28)
 
 Both packages:

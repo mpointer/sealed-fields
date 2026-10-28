@@ -203,6 +203,7 @@ class SealedFields:
         mode: str = "strict",
         legacy: Sequence[str] = (),
         on_unknown_version: str = "throw",
+        plaintext: str = "passthrough",
         logger: Callable[[str], None] | None = None,
     ) -> None:
         if not namespaces:
@@ -233,6 +234,13 @@ class SealedFields:
         if on_unknown_version not in ("throw", "passthrough"):
             raise SealedFieldsError('on_unknown_version must be "throw" or "passthrough".')
         self._on_unknown_version = on_unknown_version
+        if plaintext not in ("passthrough", "reject"):
+            raise SealedFieldsError('plaintext must be "passthrough" or "reject".')
+        if plaintext == "reject" and mode == "dormant":
+            raise SealedFieldsError(
+                'plaintext "reject" cannot be combined with mode "dormant", which writes plaintext.'
+            )
+        self._plaintext = plaintext
         self._warn = logger or (lambda m: print(m))
         self._warned_dormant: set[str] = set()
 
@@ -328,6 +336,8 @@ class SealedFields:
             decoded = self._try_legacy(value, ring)
             if decoded is not None:
                 return decoded
+        if self._plaintext == "reject":
+            raise SealedFieldsError('unseal: value is not a sealed token (plaintext: "reject").')
         return value  # plaintext passthrough
 
     def maybe_seal(self, value: str | None, namespace: str | None = None) -> str | None:
@@ -422,7 +432,9 @@ class SealedFields:
             v = out.get(field)
             if not isinstance(v, str) or v == "":
                 continue
-            if not (is_sealed(v) or any(_match_legacy(v, f) for f in self._legacy)):
+            if self._plaintext == "passthrough" and not (
+                is_sealed(v) or any(_match_legacy(v, f) for f in self._legacy)
+            ):
                 continue
             attempts += 1
             try:
