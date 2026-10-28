@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { createSealedFields, generateKey, isSealed } from "../src/index.js";
+import { SystemicUnsealError, createSealedFields, generateKey, isSealed } from "../src/index.js";
 
 const KEY = generateKey();
 const KEY_BUF = Buffer.from(KEY, "base64url");
@@ -77,6 +77,33 @@ describe("legacy decoders", () => {
     for (const s of ["a:b:c", "12:30:45", "v1:looks:like:legacy but is not base64 of the right lengths"]) {
       expect(sf.unseal(s)).toBe(s);
     }
+  });
+
+  it("row helpers decode legacy tokens instead of returning raw ciphertext", () => {
+    const sf = createSealedFields({
+      namespaces: { PII: { key: KEY } },
+      legacy: ["iv-ct-tag", "v1-iv-tag-ct"],
+      logger: { warn: () => {} },
+    });
+    const row = { a: encodeIvCtTag("one", KEY_BUF), b: encodeV1IvTagCt("two", KEY_BUF) };
+    expect(sf.unsealRow(row, ["a", "b"])).toEqual({ a: "one", b: "two" });
+  });
+
+  it("legacy failures in row helpers null the field and count toward systemic detection", () => {
+    const sf = createSealedFields({
+      namespaces: { PII: { key: KEY } },
+      legacy: ["iv-ct-tag"],
+      logger: { warn: () => {} },
+    });
+    const rows = Array.from({ length: 5 }, (_, i) => ({ a: encodeIvCtTag(`p${i}`, OLD_KEY_BUF) }));
+    expect(sf.unsealRow(rows[0]!, ["a"]).a).toBeNull();
+    expect(() => sf.unsealRows(rows, ["a"])).toThrow(SystemicUnsealError);
+  });
+
+  it("rejects an unknown legacy format name", () => {
+    expect(() =>
+      createSealedFields({ namespaces: { PII: { key: KEY } }, legacy: ["nope" as never] }),
+    ).toThrow(/unknown legacy format/);
   });
 
   it("re-sealing legacy data writes the canonical format", () => {

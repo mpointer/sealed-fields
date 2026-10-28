@@ -313,6 +313,8 @@ class SealedFields:
                     return value
                 raise UnknownKeyVersionError(version, ns)
             raw = _decode_blob(m.group(2))
+            if len(raw) < NONCE_BYTES + TAG_BYTES:
+                raise SealedFieldsError("unseal: token is too short to be a sealed value.")
             nonce, ct = raw[:NONCE_BYTES], raw[NONCE_BYTES:]
             return AESGCM(key).decrypt(nonce, ct, version.encode("ascii")).decode("utf-8")
         if ring is not None and self._legacy:
@@ -368,8 +370,8 @@ class SealedFields:
             v = out.get(field)
             if not isinstance(v, str) or v == "":
                 continue
-            if is_sealed(v):
-                continue
+            # Seal unconditionally: a value that merely looks like a token is
+            # untrusted input, not ciphertext. Call seal_row once per write.
             out[field] = self.seal(v, namespace)
         return out
 
@@ -382,7 +384,9 @@ class SealedFields:
         attempts = 0
         for field in (*fields, *json_fields):
             v = out.get(field)
-            if not isinstance(v, str) or v == "" or not is_sealed(v):
+            if not isinstance(v, str) or v == "":
+                continue
+            if not (is_sealed(v) or any(_match_legacy(v, f) for f in self._legacy)):
                 continue
             attempts += 1
             try:

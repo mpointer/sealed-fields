@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { NONCE_BYTES, TAG_BYTES, type Keyring } from "./keyring.js";
-import { UnknownKeyVersionError } from "./errors.js";
+import { SealedFieldsError, UnknownKeyVersionError } from "./errors.js";
 
 // Canonical wire format:
 //
@@ -74,10 +74,15 @@ export function unsealWithKeyring(
     throw new UnknownKeyVersionError(parsed.version, namespace);
   }
   const raw = decodeBlob(parsed.blob);
+  // Without this check and a pinned authTagLength, a short blob makes the
+  // tag slice short too, and Node 20/22 accept truncated GCM tags.
+  if (raw.length < NONCE_BYTES + TAG_BYTES) {
+    throw new SealedFieldsError("unseal: token is too short to be a sealed value.");
+  }
   const nonce = raw.subarray(0, NONCE_BYTES);
   const ciphertext = raw.subarray(NONCE_BYTES, raw.length - TAG_BYTES);
   const tag = raw.subarray(raw.length - TAG_BYTES);
-  const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+  const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: TAG_BYTES });
   decipher.setAAD(Buffer.from(parsed.version, "ascii"));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");

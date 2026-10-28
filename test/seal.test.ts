@@ -162,6 +162,29 @@ describe("strict vs dormant mode", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("PLAINTEXT");
   });
+
+  it("rejects an unrecognized mode instead of failing open to plaintext", () => {
+    // Regression: any value other than exactly "strict" behaved as dormant.
+    expect(() =>
+      createSealedFields({ namespaces: { PII: {} }, mode: "STRICT" as never }),
+    ).toThrow(SealedFieldsError);
+  });
+
+  it("rejects an unrecognized onUnknownVersion", () => {
+    expect(() =>
+      createSealedFields({ namespaces: { PII: { key: KEY_A } }, onUnknownVersion: "skip" as never }),
+    ).toThrow(SealedFieldsError);
+  });
+});
+
+describe("short tokens", () => {
+  it("rejects a canonical-shaped token shorter than nonce+tag", () => {
+    // Guards against truncated-tag acceptance on Node 20/22.
+    const sf = createSealedFields({ namespaces: { PII: { key: KEY_A } } });
+    for (const t of ["v1:AAAAAA", "v1:AAAAAAAAAAA", "v1:" + "A".repeat(36)]) {
+      expect(() => sf.unseal(t)).toThrow(/too short/);
+    }
+  });
 });
 
 describe("maybeSeal / maybeUnseal", () => {

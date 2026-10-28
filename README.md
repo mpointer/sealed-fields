@@ -97,11 +97,12 @@ await db.insert(notes).values(sf.sealRow(values, NOTE_FIELDS));
 const rows = sf.unsealRows(await db.select().from(notes), NOTE_FIELDS);
 ```
 
-The helpers carry three production lessons:
+The helpers carry four production lessons:
 
 1. A failed unseal nulls the field instead of handing raw ciphertext to your UI.
 2. If more than half of attempted unseals across a batch fail (minimum 5), `unsealRows` throws `SystemicUnsealError`. That pattern means the wrong key is configured, and a page of silent nulls is worse than an error page. Plaintext rows mid-migration do not dilute the rate; only genuinely sealed values count as attempts.
 3. `jsonFields` are stringified before sealing and parsed after unsealing, unconditionally in both directions. A conditional version of this (stringify only objects, parse everything) shipped a real bug: every string-valued row came back null. Seal and unseal must be true inverses.
+4. `sealRow` seals every listed string, even one that already looks like a token, so call it exactly once per write. Before 0.3.0 it skipped token-shaped values, which let a user store chosen "ciphertext" unencrypted and, with five such values on a page, trip `SystemicUnsealError` for everyone.
 
 ## Migration from plaintext, and from other wire formats
 

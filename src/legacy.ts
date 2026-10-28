@@ -14,7 +14,8 @@ import { NONCE_BYTES, TAG_BYTES, type Keyring } from "./keyring.js";
 // Both are tried with the active key first, then every retired key, because
 // versionless formats cannot say which key wrote them.
 
-export type LegacyFormat = "iv-ct-tag" | "v1-iv-tag-ct";
+export const LEGACY_FORMATS = ["iv-ct-tag", "v1-iv-tag-ct"] as const;
+export type LegacyFormat = (typeof LEGACY_FORMATS)[number];
 
 interface LegacyParts {
   iv: Buffer;
@@ -43,7 +44,7 @@ export function matchLegacy(token: string, format: LegacyFormat): LegacyParts | 
 }
 
 function decryptParts(parts: LegacyParts, key: Buffer): string {
-  const decipher = createDecipheriv("aes-256-gcm", key, parts.iv);
+  const decipher = createDecipheriv("aes-256-gcm", key, parts.iv, { authTagLength: TAG_BYTES });
   decipher.setAuthTag(parts.tag);
   return Buffer.concat([decipher.update(parts.ciphertext), decipher.final()]).toString("utf8");
 }
