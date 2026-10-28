@@ -49,6 +49,14 @@ export interface SealedFieldsConfig {
    * and is only for the window of an active key rotation.
    */
   onUnknownVersion?: "throw" | "passthrough";
+  /**
+   * What unseal does with a value that is not a token. "passthrough" (default)
+   * returns it unchanged, for tables still holding plaintext. "reject" throws,
+   * for columns that are fully migrated: a plaintext value there means someone
+   * wrote around the library. Row helpers null rejected fields and count them
+   * toward SystemicUnsealError. Cannot be combined with mode "dormant".
+   */
+  plaintext?: "passthrough" | "reject";
   logger?: SealedFieldsLogger;
 }
 
@@ -73,6 +81,7 @@ export class SealedFields {
   private readonly mode: "strict" | "dormant";
   private readonly legacy: readonly LegacyFormat[];
   private readonly onUnknownVersion: "throw" | "passthrough";
+  private readonly plaintext: "passthrough" | "reject";
   private readonly logger: SealedFieldsLogger;
   private readonly warnedDormant = new Set<string>();
 
@@ -110,6 +119,15 @@ export class SealedFields {
       throw new SealedFieldsError(
         `onUnknownVersion must be "throw" or "passthrough" (got "${String(this.onUnknownVersion)}").`,
       );
+    }
+    this.plaintext = config.plaintext ?? "passthrough";
+    if (this.plaintext !== "passthrough" && this.plaintext !== "reject") {
+      throw new SealedFieldsError(
+        `plaintext must be "passthrough" or "reject" (got "${String(this.plaintext)}").`,
+      );
+    }
+    if (this.plaintext === "reject" && this.mode === "dormant") {
+      throw new SealedFieldsError(`plaintext "reject" cannot be combined with mode "dormant", which writes plaintext.`);
     }
     this.logger = config.logger ?? console;
   }
@@ -180,6 +198,9 @@ export class SealedFields {
     if (ring && this.legacy.length > 0) {
       const legacy = tryLegacyFormats(value, this.legacy, ring);
       if (legacy !== null) return legacy;
+    }
+    if (this.plaintext === "reject") {
+      throw new SealedFieldsError(`unseal: value is not a sealed token (plaintext: "reject").`);
     }
     return value; // plaintext passthrough
   }
@@ -263,7 +284,7 @@ export class SealedFields {
     for (const field of [...fields, ...jsonFields]) {
       const v = out[field];
       if (typeof v !== "string" || v.length === 0) continue;
-      if (!looksSealed(v) && !this.legacy.some((f) => matchLegacy(v, f))) continue;
+      if (this.plaintext === "passthrough" && !looksSealed(v) && !this.legacy.some((f) => matchLegacy(v, f))) continue;
       attempts++;
       try {
         out[field] = this.unseal(v, namespace);

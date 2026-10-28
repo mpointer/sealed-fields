@@ -402,3 +402,26 @@ def test_trailing_newline_is_not_a_token():
 def test_empty_namespace_is_not_the_default():
     with pytest.raises(SealedFieldsError, match="unknown namespace"):
         make_sf().seal("x", "")
+
+
+class TestPlaintextReject:
+    def make(self):
+        return make_sf(plaintext="reject", logger=lambda m: None)
+
+    def test_unseal_throws_on_plaintext_and_decodes_tokens(self):
+        sf = self.make()
+        with pytest.raises(SealedFieldsError, match="not a sealed token"):
+            sf.unseal("plain")
+        assert sf.unseal(sf.seal("x")) == "x"
+
+    def test_row_helpers_null_and_count_plaintext(self):
+        sf = self.make()
+        assert sf.unseal_row({"a": "plain", "b": sf.seal("ok")}, ["a", "b"]) == {"a": None, "b": "ok"}
+        with pytest.raises(SystemicUnsealError):
+            sf.unseal_rows([{"a": "plain"}] * 5, ["a"])
+
+    def test_rejects_invalid_values_and_dormant_combination(self):
+        with pytest.raises(SealedFieldsError, match="plaintext must be"):
+            make_sf(plaintext="deny")
+        with pytest.raises(SealedFieldsError, match="dormant"):
+            create_sealed_fields(namespaces={"PII": {}}, mode="dormant", plaintext="reject")

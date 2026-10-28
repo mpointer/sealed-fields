@@ -115,3 +115,30 @@ describe("jsonFields", () => {
     expect(out.snapshot).toBeNull();
   });
 });
+
+describe('plaintext: "reject"', () => {
+  const strictSf = () =>
+    createSealedFields({ namespaces: { PII: { key: KEY } }, plaintext: "reject", logger: quiet });
+
+  it("unseal throws on plaintext and still decodes tokens", () => {
+    const sf = strictSf();
+    expect(() => sf.unseal("plain")).toThrow(/not a sealed token/);
+    expect(sf.unseal(sf.seal("x"))).toBe("x");
+  });
+
+  it("row helpers null plaintext fields and count them toward systemic failure", () => {
+    const sf = strictSf();
+    expect(sf.unsealRow({ a: "plain", b: sf.seal("ok") }, ["a", "b"])).toEqual({ a: null, b: "ok" });
+    const rows = Array.from({ length: 5 }, () => ({ a: "plain" }));
+    expect(() => sf.unsealRows(rows, ["a"])).toThrow(SystemicUnsealError);
+  });
+
+  it("rejects invalid values and the dormant combination", () => {
+    expect(() =>
+      createSealedFields({ namespaces: { PII: { key: KEY } }, plaintext: "deny" as never }),
+    ).toThrow(/plaintext must be/);
+    expect(() =>
+      createSealedFields({ namespaces: { PII: {} }, mode: "dormant", plaintext: "reject" }),
+    ).toThrow(/dormant/);
+  });
+});
