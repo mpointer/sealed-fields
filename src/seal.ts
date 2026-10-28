@@ -9,7 +9,9 @@ import { SealedFieldsError, UnknownKeyVersionError } from "./errors.js";
 // AES-256-GCM, random 12-byte nonce per value, 16-byte tag. The key version
 // label is bound as additional authenticated data (AAD), so a token cannot be
 // silently re-attributed to a different key version: tampering with the
-// prefix fails authentication.
+// prefix fails authentication. An optional context (table, column, row id)
+// extends the AAD to version || 0x00 || context, so a token moved to another
+// row or column fails authentication too. The token format is unchanged.
 //
 // This is byte-compatible with the Python reference implementation, which
 // uses AESGCM(nonce, plaintext, aad=version) via the `cryptography` package
@@ -41,11 +43,17 @@ function decodeBlob(blob: string): Buffer {
   return Buffer.from(blob.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 }
 
-export function sealWithKeyring(plaintext: string, ring: Keyring): string {
+/** GCM AAD: the version label, plus `0x00 || context` when bound. */
+export function buildAad(version: string, context: string | null): Buffer {
+  const v = Buffer.from(version, "ascii");
+  return context === null ? v : Buffer.concat([v, Buffer.from([0]), Buffer.from(context, "utf8")]);
+}
+
+export function sealWithKeyring(plaintext: string, ring: Keyring, context: string | null = null): string {
   const key = ring.keys.get(ring.activeVersion)!;
   const nonce = randomBytes(NONCE_BYTES);
   const cipher = createCipheriv("aes-256-gcm", key, nonce);
-  cipher.setAAD(Buffer.from(ring.activeVersion, "ascii"));
+  cipher.setAAD(buildAad(ring.activeVersion, context));
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   const blob = Buffer.concat([nonce, ciphertext, tag]).toString("base64url");
@@ -66,6 +74,7 @@ export function unsealWithKeyring(
   ring: Keyring,
   namespace: string,
   onUnknownVersion: "throw" | "passthrough",
+  context: string | null = null,
 ): string {
   const parsed = parseToken(token)!;
   const key = ring.keys.get(parsed.version);
@@ -83,7 +92,7 @@ export function unsealWithKeyring(
   const ciphertext = raw.subarray(NONCE_BYTES, raw.length - TAG_BYTES);
   const tag = raw.subarray(raw.length - TAG_BYTES);
   const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: TAG_BYTES });
-  decipher.setAAD(Buffer.from(parsed.version, "ascii"));
+  decipher.setAAD(buildAad(parsed.version, context));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }

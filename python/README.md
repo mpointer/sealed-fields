@@ -71,6 +71,13 @@ class Note(Base):
     body = Column(SealedText(current_sf, namespace="PII"))
 ```
 
+Pass `context` to bind each token to its column, so a value copied into
+another column fails to decrypt: `SealedText(current_sf, "PII",
+["notes", "body"])`. These types never see the row, so they bind table and
+column only. For row-level binding, use the row helpers. See "Bind tokens
+to their column" in the main README for migrating existing rows with
+`context_fallback=True` and `sf.stats()["unbound_reads"]`.
+
 What happens at the boundary, each one a production lesson:
 
 - `None` is SQL `NULL` both ways. An empty string is sealed like any other

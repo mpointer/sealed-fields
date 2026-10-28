@@ -71,6 +71,23 @@ sf.seal(totpSecret, "TOTP");
 
 A value sealed in one namespace fails authentication in another. That is enforced by the key, not by convention.
 
+## Bind tokens to their column
+
+A token only authenticates its key version. Someone who can write to the database without the key can still copy a sealed value from one column or row to another, and it decrypts there. Pass a `context` to bind the token to where it lives:
+
+```ts
+const token = sf.seal(email, { namespace: "PII", context: ["users", "email"] });
+sf.unseal(token, { namespace: "PII", context: ["users", "email"] });
+```
+
+The context goes into the GCM additional authenticated data, so the token format is unchanged. Unsealing under any other context, or with none, fails authentication like a tampered token. Parts are joined with a NUL byte, so `["a.b", "c"]` and `["a", "b.c"]` never collide.
+
+Bind table and column by default. Adding the row id also stops copying between rows, but only works when the id exists before the write. With database-generated ids (`SERIAL`, auto-increment) that means insert-then-update, which is easy to get wrong. Use it on tables with client-generated ids such as UUIDs, and reseal the value if the id ever changes.
+
+Row helpers take a context function: `{ fields: ["email"], context: (field) => ["users", field] }`. Use the same spec for `sealRow` and `unsealRows`. It receives `(field, row)` when you do bind row ids.
+
+**Migrating existing rows.** Rows sealed before you added a context won't authenticate under it. Set `contextFallback: true` during the migration. A read that fails under the context is retried without it, logged once per namespace, and counted in `sf.stats().unboundReads`. Run a backfill that reads and reseals every row, confirm `unboundReads` stays at zero on every instance over a full read cycle, then remove `contextFallback`. Fallback only drops the context, so a token that was already bound still cannot move. Legacy-format tokens have no AAD and so cannot be bound. With a context they read only under `contextFallback`, and count as unbound.
+
 ## Blind indexes: equality lookups on encrypted columns
 
 Encrypted columns cannot be queried. A blind index is a deterministic HMAC-SHA256 of the normalized value, stored in a sibling column, so `WHERE email_idx = ?` works while the email itself stays sealed:

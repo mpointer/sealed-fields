@@ -46,7 +46,7 @@ Behavior at the boundaries, learned in production and kept deliberately:
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Sequence, Union
 
 from sqlalchemy.types import String, Text, TypeDecorator
 
@@ -76,9 +76,10 @@ class _SealedType(TypeDecorator):
         self,
         provider: Optional[Provider] = None,
         namespace: Optional[str] = None,
+        context: Union[str, Sequence[str], None] = None,
         **impl_kwargs: Any,
     ) -> None:
-        # `namespace` is positional-or-keyword on purpose: SQLAlchemy builds
+        # `namespace` and `context` are positional-or-keyword on purpose: SQLAlchemy builds
         # the cache key from positional-or-keyword __init__ names only, and a
         # keyword-only one would be left out of it.
         super().__init__(**impl_kwargs)
@@ -99,6 +100,9 @@ class _SealedType(TypeDecorator):
         # columns sealed by different providers must never share one.
         self.provider = resolved
         self.namespace = namespace
+        # Column-level binding only (e.g. "users.ssn"): these hooks never see
+        # the row. A tuple keeps the cache key hashable.
+        self.context = context if context is None or isinstance(context, str) else tuple(context)
 
     def _sf(self) -> SealedFields:
         p = self.provider
@@ -111,10 +115,10 @@ class _SealedType(TypeDecorator):
         return sf
 
     def _seal(self, value: str) -> str:
-        return self._sf().seal(value, self.namespace)
+        return self._sf().seal(value, self.namespace, context=self.context)
 
     def _unseal(self, value: str) -> str:
-        return self._sf().unseal(value, self.namespace)
+        return self._sf().unseal(value, self.namespace, context=self.context)
 
 
 class SealedText(_SealedType):

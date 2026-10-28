@@ -1,6 +1,6 @@
 # Design note: binding sealed values to their row and column
 
-Status: accepted, not implemented. Target: 0.6.0.
+Status: implemented in 0.6.0.
 
 ## Problem
 
@@ -85,7 +85,7 @@ break them on day one.
   counter (below).
 - Writes always bind. A normal re-encrypt backfill (read with fallback,
   write bound) migrates the table.
-- `sf.stats()` (Python `sf.stats()`) returns `{ unboundReads }`, the number
+- `sf.stats()` returns `{ unboundReads }` (Python `{"unbound_reads": n}`), the number
   of fallback decrypts since the instance was created. A backfill job or a
   health check can confirm it stays at zero over a full read cycle before
   fallback is turned off. The counter is per instance and per process, so
