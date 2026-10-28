@@ -120,6 +120,8 @@ const sf = createSealedFields({
 
 Reads understand the old tokens. Every write produces the canonical format. A legacy-shaped token that no key can authenticate throws, because that is an integrity problem, not plaintext.
 
+**Audit plaintext before turning on a key or a legacy decoder.** Plaintext written in dormant mode, written before 0.3.0, or still sitting in a mixed table may contain user input shaped like a token. Once a key or decoder is on, those values fail authentication. The row helpers null them, and enough of them on one page trip `SystemicUnsealError`. Before enabling, scan the column with `isSealed` (plus your legacy shape). Re-seal or clear any row that matches a token shape but doesn't decrypt under your keys.
+
 ## Fail closed by default
 
 With no key configured, `seal` throws. If you need the deploy window where code ships before keys are provisioned, opt in explicitly:
