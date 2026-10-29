@@ -2,7 +2,7 @@
 
 Both packages share one version number and one `v*` tag.
 
-## Unreleased
+## 0.6.1 (2026-10-29)
 
 Both packages:
 
