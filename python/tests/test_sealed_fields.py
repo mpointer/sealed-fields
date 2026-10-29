@@ -271,6 +271,14 @@ class TestLegacy:
     def _key_bytes(self, key_str):
         return base64.urlsafe_b64decode(key_str + "=" * (-len(key_str) % 4))
 
+    def test_dormant_refuses_legacy_shaped_input(self):
+        sf = create_sealed_fields(
+            namespaces={"PII": {}}, mode="dormant", legacy=["iv-ct-tag"], logger=lambda _m: None
+        )
+        with pytest.raises(SealedFieldsError):
+            sf.seal(self._iv_ct_tag("x", self._key_bytes(KEY_A)))
+        assert sf.seal("plain") == "plain"
+
     def test_iv_ct_tag_decodes(self):
         sf = make_sf(legacy=["iv-ct-tag"])
         assert sf.unseal(self._iv_ct_tag("legacy value", self._key_bytes(KEY_A))) == "legacy value"
