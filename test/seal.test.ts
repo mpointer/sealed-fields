@@ -179,6 +179,17 @@ describe("strict vs dormant mode", () => {
     expect(warnings[0]).toContain("PLAINTEXT");
   });
 
+  it("dormant: refuses token-shaped input instead of storing it as plaintext", () => {
+    // Regression: stored as-is, these failed auth once a key was provisioned
+    // and enough of them on one page tripped SystemicUnsealError.
+    const sf = createSealedFields({ namespaces: { PII: {} }, mode: "dormant", logger: { warn: () => {} } });
+    const keyed = createSealedFields({ namespaces: { PII: { keys: { v1: KEY_A } } } });
+    expect(() => sf.seal(keyed.seal("x"))).toThrow(SealedFieldsError);
+    expect(() => sf.seal("v1:AAAA")).toThrow(SealedFieldsError);
+    expect(() => sf.sealRow({ name: "v9:abc" }, ["name"])).toThrow(SealedFieldsError);
+    expect(sf.seal("v1 not a token")).toBe("v1 not a token");
+  });
+
   it("dormant: warns once per namespace, not once per instance", () => {
     const warnings: string[] = [];
     const sf = createSealedFields({

@@ -222,6 +222,11 @@ export class SealedFields {
           `namespace "${ns}" has no key configured; cannot seal (mode: "strict").`,
         );
       }
+      // Stored as-is, a token-shaped value would fail auth once a key is on
+      // and count toward SystemicUnsealError. Refuse it instead.
+      if (parseToken(plaintext) || this.legacy.some((f) => matchLegacy(plaintext, f))) {
+        throw new SealedFieldsError(`seal: refusing to store a token-shaped value as plaintext (mode: "dormant").`);
+      }
       this.warnDormantOnce(ns);
       return plaintext;
     }

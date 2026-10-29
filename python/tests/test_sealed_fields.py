@@ -154,6 +154,20 @@ class TestModes:
         assert len(warnings) == 1
         assert "PLAINTEXT" in warnings[0]
 
+    def test_dormant_refuses_token_shaped_input(self):
+        # Regression: stored as-is, these failed auth once a key was
+        # provisioned and enough of them on one page tripped SystemicUnsealError.
+        sf = create_sealed_fields(
+            namespaces={"PII": {}}, mode="dormant", logger=lambda _m: None
+        )
+        with pytest.raises(SealedFieldsError):
+            sf.seal(make_sf().seal("x"))
+        with pytest.raises(SealedFieldsError):
+            sf.seal("v1:AAAA")
+        with pytest.raises(SealedFieldsError):
+            sf.seal_row({"name": "v9:abc"}, ["name"])
+        assert sf.seal("v1 not a token") == "v1 not a token"
+
     def test_dormant_warns_once_per_namespace(self):
         warnings = []
         sf = create_sealed_fields(
