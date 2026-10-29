@@ -2,6 +2,16 @@
 
 Both packages share one version number and one `v*` tag.
 
+## 0.6.1 (2026-10-29)
+
+Both packages:
+
+- Dormant mode: `seal` throws `SealedFieldsError` on a value shaped like a
+  sealed token (canonical or an enabled legacy format) instead of storing
+  it as plaintext. Stored as-is, such values failed authentication once a
+  key was provisioned, and five on one page tripped `SystemicUnsealError`
+  for every reader. Plaintext that is not token-shaped is unaffected.
+
 ## 0.6.0 (2026-10-28)
 
 Both packages:

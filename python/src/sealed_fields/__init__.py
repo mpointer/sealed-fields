@@ -336,6 +336,14 @@ class SealedFields:
                 raise KeyNotConfiguredError(
                     f'namespace "{ns}" has no key configured; cannot seal (mode: "strict").'
                 )
+            # Stored as-is, a token-shaped value would fail auth once a key is
+            # on and count toward SystemicUnsealError. Refuse it instead.
+            if _TOKEN_RE.fullmatch(plaintext) or any(
+                _match_legacy(plaintext, f) for f in self._legacy
+            ):
+                raise SealedFieldsError(
+                    'seal: refusing to store a token-shaped value as plaintext (mode: "dormant").'
+                )
             self._warn_dormant_once(ns)
             return plaintext
         nonce = secrets.token_bytes(NONCE_BYTES)

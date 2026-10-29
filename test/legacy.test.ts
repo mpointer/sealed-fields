@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { SystemicUnsealError, createSealedFields, generateKey, isSealed } from "../src/index.js";
+import { SealedFieldsError, SystemicUnsealError, createSealedFields, generateKey, isSealed } from "../src/index.js";
 
 const KEY = generateKey();
 const KEY_BUF = Buffer.from(KEY, "base64url");
@@ -28,6 +28,17 @@ function encodeV1IvTagCt(plaintext: string, key: Buffer): string {
 }
 
 describe("legacy decoders", () => {
+  it("dormant mode refuses a value shaped like an enabled legacy format", () => {
+    const sf = createSealedFields({
+      namespaces: { PII: {} },
+      mode: "dormant",
+      legacy: ["iv-ct-tag"],
+      logger: { warn: () => {} },
+    });
+    expect(() => sf.seal(encodeIvCtTag("x", KEY_BUF))).toThrow(SealedFieldsError);
+    expect(sf.seal("plain")).toBe("plain");
+  });
+
   it("unseals the iv-ct-tag format when enabled", () => {
     const sf = createSealedFields({
       namespaces: { PII: { key: KEY } },
