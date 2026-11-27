@@ -531,3 +531,80 @@ class TestContextBinding:
         migrating = make_sf(legacy=["iv-ct-tag"], context_fallback=True, logger=lambda m: None)
         assert migrating.unseal(token, context="t.c") == "old"
         assert migrating.stats()["unbound_reads"] == 1
+
+
+class TestAudit:
+    CTX = ["users", "email"]
+
+    @staticmethod
+    def _iv_ct_tag(plaintext: str, key_str: str) -> str:
+        key = base64.urlsafe_b64decode(key_str + "=" * (-len(key_str) % 4))
+        nonce = os.urandom(12)
+        ct_tag = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
+        b64 = lambda b: base64.b64encode(b).decode()
+        return f"{b64(nonce)}:{b64(ct_tag[:-16])}:{b64(ct_tag[-16:])}"
+
+    def _sfs(self):
+        before = make_sf()
+        sf = create_sealed_fields(
+            namespaces={"PII": {"key": KEY_B, "version": "v2", "retired": {"v1": KEY_A}}},
+            legacy=["iv-ct-tag"],
+        )
+        return before, sf
+
+    def test_classifies_every_state(self):
+        before, sf = self._sfs()
+        stranger = create_sealed_fields(namespaces={"PII": {"key": generate_key()}})
+        cases = [
+            (None, ("empty", None)),
+            ("", ("empty", None)),
+            ("alice@example.com", ("plaintext", None)),
+            (sf.seal("a", context=self.CTX), ("sealed", "v2")),
+            (before.seal("a", context=self.CTX), ("sealed", "v1")),
+            (sf.seal("a"), ("unbound", "v2")),
+            (self._iv_ct_tag("a", KEY_A), ("legacy", None)),
+            (self._iv_ct_tag("a", generate_key()), ("invalid", None)),
+            ("v9:" + "A" * 40, ("unknown-version", "v9")),
+            ("v2" + stranger.seal("a", context=self.CTX)[2:], ("invalid", "v2")),
+            ("v2:AAAA", ("invalid", "v2")),
+            ("v2:AAAAA", ("invalid", "v2")),  # undecodable base64 length
+            (sf.seal("a", context=["contacts", "email"]), ("invalid", "v2")),
+        ]
+        for value, expected in cases:
+            assert sf.classify(value, context=self.CTX) == expected, value
+
+    def test_without_context(self):
+        _, sf = self._sfs()
+        assert sf.classify(sf.seal("a", context=self.CTX))[0] == "invalid"
+        assert sf.classify(sf.seal("a")) == ("sealed", "v2")
+
+    def test_counts_a_column(self):
+        before, sf = self._sfs()
+        column = [
+            sf.seal("a", context=self.CTX),
+            sf.seal("b", context=self.CTX),
+            before.seal("c", context=self.CTX),
+            sf.seal("d"),
+            "plain",
+            None,
+            self._iv_ct_tag("e", KEY_A),
+            "v2:AAAA",
+        ]
+        assert sf.audit(column, context=self.CTX) == {
+            "total": 8,
+            "active_version": "v2",
+            "empty": 1,
+            "plaintext": 1,
+            "legacy": 1,
+            "unbound": 1,
+            "unknown_version": 0,
+            "invalid": 1,
+            "versions": {"v2": 3, "v1": 1},
+        }
+
+    def test_refuses_dormant(self):
+        sf = create_sealed_fields(namespaces={"PII": {}}, mode="dormant", logger=lambda _m: None)
+        with pytest.raises(KeyNotConfiguredError):
+            sf.audit([])
+        with pytest.raises(KeyNotConfiguredError):
+            sf.classify("x")

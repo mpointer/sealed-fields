@@ -30,18 +30,38 @@ row helpers with systemic-failure detection, and legacy-format decoders.
 - [x] Release workflow publishes the Python package to PyPI by trusted
       publishing on the same `v*` tag as npm.
 
-## v0.4 candidates
+## v0.4 – v0.6.1 (shipped)
+
+- [x] Row-helper trust boundary: `sealRow` seals every listed string, so
+      token-shaped user input can't be stored unencrypted (0.4.0).
+- [x] Strict config and key parsing, short-token guard, pinned GCM tag
+      length (0.4.0, 0.5.0).
+- [x] Blind-index `context` to keep columns from being joinable (0.5.0).
+- [x] Context binding: tokens bound to table/column/row via GCM AAD, with
+      `contextFallback` and `stats().unboundReads` for migrating (0.6.0).
+- [x] `plaintext: "reject"` for fully migrated columns (0.6.0).
+- [x] Dormant mode refuses token-shaped input instead of storing it as
+      plaintext (0.6.1).
+
+## v0.7
+
+- [x] Key-audit helper: `audit` / `classify` count a column by state
+      (sealed per key version, unbound, plaintext, legacy, unknown version,
+      invalid) so "is the rotation done" is a query, not a guess.
+
+## Candidates
+
 - [ ] Drizzle column helpers: a `sealedText()` / `sealedJson()` custom type
       so schema declarations carry the sealing, mirroring the SQLAlchemy
       TypeDecorator pattern in the Python reference.
-- [ ] Backfill script template: cursor-paginated re-encrypt for plaintext
-      rows and for retired-key rows, with dry-run counts and progress
-      checkpoints.
-- [ ] Key-audit helper: scan a table and report rows by state (plaintext,
-      active version, each retired version, unknown version) so "is the
-      rotation done" is a query, not a guess.
+- [ ] Backfill script template: cursor-paginated re-encrypt for plaintext,
+      legacy, unbound and retired-key rows, with dry-run counts (from
+      `audit`) and progress checkpoints.
 
 ## Later / on demand
+
+- [ ] Rollback/replay protection (out of scope for context binding; see
+      `docs/design/context-binding.md`).
 
 - [ ] Additional legacy decoders if adopters bring other common formats
       (for example the compact binary `base64(iv|tag|ct)` shape).

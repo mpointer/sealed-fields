@@ -24,8 +24,8 @@ sf.blind_index("alice@example.com")                     # HMAC lookup token
 
 See the [repository README](https://github.com/mpointer/sealed-fields) for
 the full design: key rotation without a flag day, key namespaces, blind
-index entropy rules, row helpers, legacy-format decoders, and the
-fail-closed default.
+index entropy rules, row helpers, legacy-format decoders, column audits
+(`sf.audit` / `sf.classify`), and the fail-closed default.
 
 ## SQLAlchemy column types
 

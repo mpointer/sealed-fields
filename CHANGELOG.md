@@ -2,6 +2,19 @@
 
 Both packages share one version number and one `v*` tag.
 
+## 0.7.0 (2026-11-27)
+
+Both packages:
+
+- `audit(values, options)` counts a column's values by state: readable
+  canonical tokens per key version, `unbound` (decrypts only without the
+  context), `plaintext`, `legacy`, `unknownVersion` (Python
+  `unknown_version`) and `invalid` (token-shaped but not decryptable).
+  `classify(value, options)` returns one value's state (TS `{ state,
+  version }`, Python `(state, version)`). Neither throws on bad data;
+  both throw `KeyNotConfiguredError` for a dormant namespace.
+- README: "Audit a column" section; ROADMAP brought up to date.
+
 ## 0.6.1 (2026-10-29)
 
 Both packages:

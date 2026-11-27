@@ -436,6 +436,103 @@ class SealedFields:
         before fallback is turned off. Per instance and per process."""
         return {"unbound_reads": self._unbound_reads}
 
+    def classify(
+        self,
+        value: str | None,
+        namespace: str | None = None,
+        *,
+        context: str | Sequence[str] | None = None,
+    ) -> tuple[str, str | None]:
+        """Classify one stored value without raising on bad data. Returns
+        ``(state, version)``; version is the key version a canonical token
+        names, else None. ``context`` is the one the column is sealed with.
+
+        empty            None or ""
+        plaintext        not token-shaped
+        sealed           canonical token that decrypts under ``context``
+        unbound          decrypts only without the context (needs re-encrypt)
+        legacy           enabled legacy format that decrypts
+        unknown-version  names a key version the keyring doesn't hold
+        invalid          token-shaped but does not decrypt: re-seal or clear it
+
+        Raises KeyNotConfiguredError for a dormant namespace: nothing can be
+        verified without a key."""
+        aad_context = _encode_context(context)
+        ns = self._resolve_ns(namespace)
+        ring = self._rings[ns]
+        if ring is None:
+            raise KeyNotConfiguredError(f'namespace "{ns}" has no key configured; cannot audit.')
+        if value is None or value == "":
+            return ("empty", None)
+        m = _TOKEN_RE.fullmatch(value)
+        if m:
+            version = m.group(1)
+            key = ring.keys.get(version)
+            if key is None:
+                return ("unknown-version", version)
+            try:
+                raw = _decode_blob(m.group(2))
+            except (binascii.Error, ValueError):
+                return ("invalid", version)
+            if len(raw) < NONCE_BYTES + TAG_BYTES:
+                return ("invalid", version)
+            nonce, ct = raw[:NONCE_BYTES], raw[NONCE_BYTES:]
+
+            def opens(ctx: str | None) -> bool:
+                try:
+                    AESGCM(key).decrypt(nonce, ct, _build_aad(version, ctx))
+                    return True
+                except InvalidTag:
+                    return False
+
+            if opens(aad_context):
+                return ("sealed", version)
+            if aad_context is not None and opens(None):
+                return ("unbound", version)
+            return ("invalid", version)
+        if any(_match_legacy(value, f) for f in self._legacy):
+            try:
+                self._try_legacy(value, ring)
+                return ("legacy", None)
+            except Exception:
+                return ("invalid", None)
+        return ("plaintext", None)
+
+    def audit(
+        self,
+        values: Iterable[str | None],
+        namespace: str | None = None,
+        *,
+        context: str | Sequence[str] | None = None,
+    ) -> dict[str, Any]:
+        """Count a column's values by state (see ``classify``). ``versions``
+        counts readable canonical tokens (sealed + unbound) by key version, so
+        a rotation is done when it holds only ``active_version``. For a large
+        table, audit each page and sum the counts."""
+        ns = self._resolve_ns(namespace)
+        ring = self._rings[ns]
+        if ring is None:
+            raise KeyNotConfiguredError(f'namespace "{ns}" has no key configured; cannot audit.')
+        report: dict[str, Any] = {
+            "total": 0,
+            "active_version": ring.active_version,
+            "empty": 0,
+            "plaintext": 0,
+            "legacy": 0,
+            "unbound": 0,
+            "unknown_version": 0,
+            "invalid": 0,
+            "versions": {},
+        }
+        for value in values:
+            state, version = self.classify(value, ns, context=context)
+            report["total"] += 1
+            if state in ("sealed", "unbound"):
+                report["versions"][version] = report["versions"].get(version, 0) + 1
+            if state != "sealed":
+                report[state.replace("-", "_")] += 1
+        return report
+
     def maybe_seal(
         self,
         value: str | None,
