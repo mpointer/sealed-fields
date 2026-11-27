@@ -74,6 +74,27 @@ export interface SealedFieldsConfig {
  *  or be empty. "" and [] mean no context. */
 export type SealContext = string | readonly string[];
 
+export type AuditState = "empty" | "plaintext" | "sealed" | "unbound" | "legacy" | "unknown-version" | "invalid";
+
+export interface AuditResult {
+  state: AuditState;
+  /** Key version named by a canonical token. */
+  version?: string;
+}
+
+export interface AuditReport {
+  total: number;
+  activeVersion: string;
+  empty: number;
+  plaintext: number;
+  legacy: number;
+  unbound: number;
+  unknownVersion: number;
+  invalid: number;
+  /** Readable canonical tokens (sealed + unbound) by key version. */
+  versions: Record<string, number>;
+}
+
 /** Second argument of seal/unseal: a namespace name, or options. */
 export type SealOptions = string | { namespace?: string | undefined; context?: SealContext | undefined };
 
@@ -302,6 +323,82 @@ export class SealedFields {
    *  fallback is turned off. Per instance and per process. */
   stats(): { unboundReads: number } {
     return { unboundReads: this.unboundReads };
+  }
+
+  /**
+   * Classify one stored value without throwing on bad data. For audits:
+   * "is the rotation done", "is every row bound", "is anything token-shaped
+   * that won't decrypt". `context` is the one the column is sealed with.
+   *   empty            null, undefined or ""
+   *   plaintext        not token-shaped
+   *   sealed           canonical token that decrypts under `context`
+   *   unbound          decrypts only without the context (needs re-encrypt)
+   *   legacy           enabled legacy format that decrypts
+   *   unknown-version  names a key version the keyring doesn't hold
+   *   invalid          token-shaped but does not decrypt: re-seal or clear it
+   * Throws KeyNotConfiguredError for a dormant namespace: nothing can be
+   * verified without a key.
+   */
+  classify(value: string | null | undefined, options?: SealOptions): AuditResult {
+    const { namespace, context } = splitOptions(options);
+    const ns = this.resolveNs(namespace);
+    const ring = this.rings.get(ns);
+    if (!ring) throw new KeyNotConfiguredError(`namespace "${ns}" has no key configured; cannot audit.`);
+    if (value == null || value === "") return { state: "empty" };
+    const parsed = parseToken(value);
+    if (parsed) {
+      const { version } = parsed;
+      if (!ring.keys.has(version)) return { state: "unknown-version", version };
+      const opens = (ctx: string | null): boolean => {
+        try {
+          unsealWithKeyring(value, ring, ns, "throw", ctx);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      if (opens(context)) return { state: "sealed", version };
+      if (context !== null && opens(null)) return { state: "unbound", version };
+      return { state: "invalid", version };
+    }
+    if (this.legacy.some((f) => matchLegacy(value, f))) {
+      try {
+        tryLegacyFormats(value, this.legacy, ring);
+        return { state: "legacy" };
+      } catch {
+        return { state: "invalid" };
+      }
+    }
+    return { state: "plaintext" };
+  }
+
+  /** Count a column's values by state (see classify). `versions` counts
+   *  readable canonical tokens (sealed + unbound) by key version, so a
+   *  rotation is done when it holds only `activeVersion`. For a large table,
+   *  audit each page and sum the counts. */
+  audit(values: Iterable<string | null | undefined>, options?: SealOptions): AuditReport {
+    const ns = this.resolveNs(splitOptions(options).namespace);
+    const ring = this.rings.get(ns);
+    if (!ring) throw new KeyNotConfiguredError(`namespace "${ns}" has no key configured; cannot audit.`);
+    const report: AuditReport = {
+      total: 0,
+      activeVersion: ring.activeVersion,
+      empty: 0,
+      plaintext: 0,
+      legacy: 0,
+      unbound: 0,
+      unknownVersion: 0,
+      invalid: 0,
+      versions: {},
+    };
+    for (const value of values) {
+      const { state, version } = this.classify(value, options);
+      report.total++;
+      if (state === "sealed" || state === "unbound") report.versions[version!] = (report.versions[version!] ?? 0) + 1;
+      if (state === "unknown-version") report.unknownVersion++;
+      else if (state !== "sealed") report[state]++;
+    }
+    return report;
   }
 
   /** Seal only when a value is present. Convenience for nullable columns. */

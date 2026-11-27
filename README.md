@@ -50,7 +50,7 @@ const sf = createSealedFields({
 });
 ```
 
-New writes seal under v2. Old rows keep reading under v1. Re-encrypt at your leisure with a backfill script, then drop the retired key. If a token names a version you no longer hold, `unseal` throws instead of returning ciphertext. The `onUnknownVersion: "passthrough"` option exists for the migration window only.
+New writes seal under v2. Old rows keep reading under v1. Re-encrypt at your leisure with a backfill script, then drop the retired key once `sf.audit` (below) shows no rows left under it. If a token names a version you no longer hold, `unseal` throws instead of returning ciphertext. The `onUnknownVersion: "passthrough"` option exists for the migration window only.
 
 Rotate well before one key has sealed about 4 billion (2^32) values. Each seal uses a random 96-bit nonce, and NIST SP 800-38D caps random-nonce GCM at 2^32 encryptions per key, because past that point a repeated nonce becomes likely enough to matter. A repeated nonce under one key leaks the XOR of the two plaintexts and lets an attacker forge tokens. Most applications never get close, but a hot column with frequent rewrites can.
 
@@ -143,9 +143,29 @@ const sf = createSealedFields({
 
 Reads understand the old tokens. Every write produces the canonical format. A legacy-shaped token that no key can authenticate throws, because that is an integrity problem, not plaintext.
 
-**Audit plaintext before turning on a key or a legacy decoder.** Plaintext written in dormant mode before 0.6.1, written before 0.4.0, or still sitting in a mixed table may contain user input shaped like a token. Once a key or decoder is on, those values fail authentication. The row helpers null them, and enough of them on one page trip `SystemicUnsealError`. Before enabling, scan the column with `isSealed` (plus your legacy shape). Re-seal or clear any row that matches a token shape but doesn't decrypt under your keys.
+**Audit plaintext before turning on a key or a legacy decoder.** Plaintext written in dormant mode before 0.6.1, written before 0.4.0, or still sitting in a mixed table may contain user input shaped like a token. Once a key or decoder is on, those values fail authentication. The row helpers null them, and enough of them on one page trip `SystemicUnsealError`. Before enabling, run `sf.audit` over the column from a one-off script built with the new key and decoder. Re-seal or clear every row it counts as `invalid`: token-shaped but not decryptable under your keys.
 
 **Close the door once the backfill is done.** By default `unseal` passes plaintext through, which also lets a value written around the library, by a raw SQL fix or a second service, sit unencrypted forever without anyone noticing. After every row is sealed, set `plaintext: "reject"`. Then `unseal` throws on a non-token value, and the row helpers null it and count it toward `SystemicUnsealError`. It cannot be combined with `mode: "dormant"`, because dormant mode writes plaintext. Since 0.6.1, dormant mode refuses to write a value shaped like a token (canonical or an enabled legacy format) and throws `SealedFieldsError` instead.
+
+## Audit a column
+
+`audit` counts a column's values by state, so "is the rotation done" and "is every row bound" are a query, not a guess. Pass the same namespace and context the column is sealed with:
+
+```ts
+const report = sf.audit(rows.map((r) => r.email), { namespace: "PII", context: ["users", "email"] });
+// { total: 1200, activeVersion: "v2", versions: { v2: 1180, v1: 12 },
+//   empty: 3, plaintext: 2, legacy: 0, unbound: 4, unknownVersion: 0, invalid: 1 }
+```
+
+| Count | Means | Action |
+| --- | --- | --- |
+| `versions` | Readable canonical tokens by key version | Rotation is done when only `activeVersion` is left |
+| `unbound` | Decrypts only without the context | Re-encrypt before removing `contextFallback` |
+| `plaintext`, `legacy` | Not yet in the canonical format | Backfill, then consider `plaintext: "reject"` |
+| `unknownVersion` | Names a key you don't hold | Find the missing retired key |
+| `invalid` | Token-shaped but doesn't decrypt | Re-seal or clear it before it trips `SystemicUnsealError` |
+
+`classify(value, options)` returns one value's state (`{ state, version }`), for finding the rows behind a count. Neither one throws on bad data, and neither writes anything. Both need a key: a dormant namespace throws `KeyNotConfiguredError`. For a large table, audit each page and sum the counts. Python: `sf.audit(values, "PII", context=[...])` returns the same counts with snake_case keys, and `sf.classify(...)` returns `(state, version)`.
 
 ## Fail closed by default
 
